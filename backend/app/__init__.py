@@ -4,7 +4,7 @@ from flask_cors import CORS
 from werkzeug.security import generate_password_hash
 
 from app.config import config_map
-from app.extensions import db, jwt, init_celery
+from app.extensions import db, jwt, mail, init_celery
 
 
 def create_app(env: str = "development") -> Flask:
@@ -15,6 +15,7 @@ def create_app(env: str = "development") -> Flask:
     CORS(app, supports_credentials=True)
     db.init_app(app)
     jwt.init_app(app)
+    mail.init_app(app)
     init_celery(app)
 
     # Ensure upload folder exists
@@ -40,13 +41,10 @@ def create_app(env: str = "development") -> Flask:
 
 
 def _seed_admin(app: Flask) -> None:
-    """Create the one admin user if it doesn't already exist."""
     from app.models import User
-
     email = app.config["ADMIN_EMAIL"]
     if User.query.filter_by(email=email).first():
         return
-
     admin = User(
         email=email,
         password_hash=generate_password_hash(app.config["ADMIN_PASSWORD"]),
