@@ -50,7 +50,16 @@ class PlacementDrive(db.Model):
     def eligible_years_list(self):
         if not self.eligible_years:
             return []
-        return [int(y.strip()) for y in self.eligible_years.split(",")]
+        years = []
+        for raw in self.eligible_years.split(","):
+            value = raw.strip()
+            if not value:
+                continue
+            try:
+                years.append(int(value))
+            except ValueError:
+                continue
+        return years
 
     def check_student_eligibility(self, student):
         """Return (bool, reason_str)."""

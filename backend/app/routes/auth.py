@@ -5,6 +5,9 @@ from flask_jwt_extended import (
     jwt_required,
     get_jwt_identity,
     get_jwt,
+    set_access_cookies,
+    set_refresh_cookies,
+    unset_jwt_cookies,
 )
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -34,7 +37,9 @@ def register_student():
     if missing:
         return _error(f"Missing fields: {', '.join(missing)}")
 
-    if User.query.filter_by(email=data["email"]).first():
+    email = data["email"].strip().lower()
+
+    if User.query.filter_by(email=email).first():
         return _error("Email already registered")
 
     if Student.query.filter_by(roll_number=data["roll_number"]).first():
@@ -58,7 +63,7 @@ def register_student():
 
     # --- create user + student ---
     user = User(
-        email=data["email"],
+        email=email,
         password_hash=generate_password_hash(data["password"]),
         role="student",
     )
@@ -91,14 +96,16 @@ def register_company():
     if missing:
         return _error(f"Missing fields: {', '.join(missing)}")
 
-    if User.query.filter_by(email=data["email"]).first():
+    email = data["email"].strip().lower()
+
+    if User.query.filter_by(email=email).first():
         return _error("Email already registered")
 
     if len(data["password"]) < 6:
         return _error("Password must be at least 6 characters")
 
     user = User(
-        email=data["email"],
+        email=email,
         password_hash=generate_password_hash(data["password"]),
         role="company",
     )
@@ -170,18 +177,21 @@ def login():
     # Build profile snippet for the frontend to store
     profile = _build_profile(user)
 
-    return _ok({
+    response, code = _ok({
         "access_token":  access_token,
         "refresh_token": refresh_token,
         "role":          user.role,
         "profile":       profile,
     })
+    set_access_cookies(response, access_token)
+    set_refresh_cookies(response, refresh_token)
+    return response, code
 
 
 # ------------------------------------------------------------------ /refresh
 
 @auth_bp.route("/refresh", methods=["POST"])
-@jwt_required(refresh=True)
+@jwt_required(refresh=True, locations=["cookies", "headers"])
 def refresh():
     identity = get_jwt_identity()
     claims   = get_jwt()
@@ -189,7 +199,9 @@ def refresh():
         identity=identity,
         additional_claims={"role": claims.get("role")}
     )
-    return _ok({"access_token": new_access})
+    response, code = _ok({"access_token": new_access})
+    set_access_cookies(response, new_access)
+    return response, code
 
 
 # ------------------------------------------------------------------ /me
@@ -211,7 +223,9 @@ def me():
 @auth_bp.route("/logout", methods=["POST"])
 @jwt_required()
 def logout():
-    return _ok({"message": "Logged out successfully"})
+    response, code = _ok({"message": "Logged out successfully"})
+    unset_jwt_cookies(response)
+    return response, code
 
 
 # ------------------------------------------------------------------ /change-password

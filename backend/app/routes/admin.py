@@ -104,11 +104,12 @@ def reject_company(company_id):
     company = Company.query.get_or_404(company_id)
     data    = request.get_json(silent=True) or {}
     reason  = data.get("reason", "").strip()
-    if not reason:
-        return _error("A rejection reason is required")
+    if not reason or len(reason) < 5:
+        return _error("A detailed rejection reason is required (min 5 characters)")
 
     company.approval_status  = "rejected"
     company.rejection_reason = reason
+    company.user.is_active   = False
     db.session.commit()
     return _ok({"message": f"{company.name} has been rejected"})
 

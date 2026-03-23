@@ -32,6 +32,24 @@ def _get_company():
     return company, None
 
 
+def _normalize_eligible_years(raw):
+    if raw is None:
+        return None
+    values = [v.strip() for v in str(raw).split(",") if v.strip()]
+    if not values:
+        return ""
+    parsed = []
+    for value in values:
+        try:
+            year = int(value)
+        except ValueError:
+            return None
+        if year not in (1, 2, 3, 4):
+            return None
+        parsed.append(str(year))
+    return ",".join(parsed)
+
+
 # ==================================================================
 # COMPANY PROFILE
 # ==================================================================
@@ -170,6 +188,10 @@ def create_drive():
     except ValueError:
         return _error("min_cgpa must be a number between 0 and 10")
 
+    eligible_years = _normalize_eligible_years(data.get("eligible_years"))
+    if data.get("eligible_years") is not None and eligible_years is None:
+        return _error("eligible_years must be comma-separated values from 1,2,3,4")
+
     drive = PlacementDrive(
         company_id=company.id,
         title=data["title"],
@@ -178,7 +200,7 @@ def create_drive():
         location=data.get("location"),
         salary_lpa=data.get("salary_lpa"),
         eligible_branches=data.get("eligible_branches"),   # "CS,IT,ECE"
-        eligible_years=data.get("eligible_years"),         # "3,4"
+        eligible_years=eligible_years,                      # "3,4"
         min_cgpa=min_cgpa,
         application_deadline=deadline,
         drive_date=drive_date,
@@ -214,6 +236,12 @@ def update_drive(drive_id):
     for field in allowed:
         if field in data:
             setattr(drive, field, data[field])
+
+    if "eligible_years" in data:
+        eligible_years = _normalize_eligible_years(data.get("eligible_years"))
+        if eligible_years is None:
+            return _error("eligible_years must be comma-separated values from 1,2,3,4")
+        drive.eligible_years = eligible_years
 
     if "application_deadline" in data:
         try:

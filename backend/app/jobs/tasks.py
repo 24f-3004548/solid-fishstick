@@ -1,9 +1,7 @@
-import csv
-import io
 from datetime import datetime, timedelta
-from flask import render_template_string
+import io
+import csv
 from flask_mail import Message
-
 from app.extensions import celery, db
 from app.models import Student, PlacementDrive, Application, User
 
@@ -196,6 +194,11 @@ def export_applications_csv(student_id):
 # ==================================================================
 
 def _render_reminder_email(student, drives):
+    from flask import current_app
+
+    frontend_url = current_app.config.get("FRONTEND_URL", "http://127.0.0.1:8080").rstrip("/")
+    dashboard_url = f"{frontend_url}/#/student/dashboard"
+
     rows = ""
     for d in drives:
         deadline = d.application_deadline.strftime("%d %b %Y, %I:%M %p")
@@ -228,7 +231,7 @@ def _render_reminder_email(student, drives):
           <tbody>{rows}</tbody>
         </table>
         <div style="text-align:center;margin:28px 0">
-          <a href="http://127.0.0.1:8080/#/student/dashboard"
+          <a href="{dashboard_url}"
             style="background:#1a56db;color:#fff;padding:12px 28px;border-radius:8px;
                    text-decoration:none;font-weight:500;font-size:14px">
             Apply now

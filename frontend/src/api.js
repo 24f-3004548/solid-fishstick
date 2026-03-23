@@ -1,63 +1,52 @@
 // ── API base URL ────────────────────────────────────────────────────────────
-const API_BASE = "http://127.0.0.1:5000/api";
+const API_BASE =
+  window.__API_BASE__ ||
+  `${window.location.protocol}//${window.location.hostname}:5000/api`;
 
 // ── Reactive auth state ──────────────────────────────────────────────────────
 const authState = Vue.reactive({
-  token: localStorage.getItem("access_token"),
-  role:  localStorage.getItem("role"),
-  user:  JSON.parse(localStorage.getItem("user") || "null"),
+  role: sessionStorage.getItem("role"),
+  user: JSON.parse(sessionStorage.getItem("user") || "null"),
 });
 
 // ── Token helpers ───────────────────────────────────────────────────────────
 const Auth = {
-  getToken()        { return authState.token; },
-  getRefreshToken() { return localStorage.getItem("refresh_token"); },
-  getUser()         { return authState.user; },
-  getRole()         { return authState.role; },
+  getUser() { return authState.user; },
+  getRole() { return authState.role; },
 
   save(data) {
-    localStorage.setItem("access_token",  data.access_token);
-    localStorage.setItem("refresh_token", data.refresh_token);
-    localStorage.setItem("role",          data.role);
-    localStorage.setItem("user",          JSON.stringify(data.profile));
-    authState.token = data.access_token;
-    authState.role  = data.role;
-    authState.user  = data.profile;
+    sessionStorage.setItem("role", data.role);
+    sessionStorage.setItem("user", JSON.stringify(data.profile));
+    sessionStorage.setItem("is_logged_in", "true");
+    authState.role = data.role;
+    authState.user = data.profile;
   },
 
   clear() {
-    ["access_token","refresh_token","role","user"].forEach(k => localStorage.removeItem(k));
-    authState.token = null;
-    authState.role  = null;
-    authState.user  = null;
+    ["role", "user", "is_logged_in"].forEach(k => sessionStorage.removeItem(k));
+    authState.role = null;
+    authState.user = null;
   },
 
-  isLoggedIn() { return !!authState.token; },
+  isLoggedIn() {
+    return sessionStorage.getItem("is_logged_in") === "true" && !!authState.role;
+  },
 };
 
 // ── Axios instance with auto token injection ────────────────────────────────
-const api = axios.create({ baseURL: API_BASE });
-
-api.interceptors.request.use(config => {
-  const token = Auth.getToken();
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
+const api = axios.create({ baseURL: API_BASE, withCredentials: true });
 
 // Auto-refresh on 401
 api.interceptors.response.use(
   res => res,
   async err => {
     const original = err.config;
-    if (err.response?.status === 401 && !original._retry && Auth.getRefreshToken()) {
+    const isRefreshCall = original?.url?.includes("/auth/refresh");
+
+    if (err.response?.status === 401 && !original._retry && !isRefreshCall && Auth.isLoggedIn()) {
       original._retry = true;
       try {
-        const { data } = await axios.post(`${API_BASE}/auth/refresh`, {}, {
-          headers: { Authorization: `Bearer ${Auth.getRefreshToken()}` }
-        });
-        localStorage.setItem("access_token", data.access_token);
-        authState.token = data.access_token;
-        original.headers.Authorization = `Bearer ${data.access_token}`;
+        await api.post("/auth/refresh");
         return api(original);
       } catch {
         Auth.clear();

@@ -41,7 +41,7 @@ const Navbar = {
     </nav>
   `,
   computed: {
-    isLoggedIn() { return !!authState.token; },
+    isLoggedIn() { return Auth.isLoggedIn(); },
     role()       { return authState.role; },
     user()       { return authState.user; },
   },

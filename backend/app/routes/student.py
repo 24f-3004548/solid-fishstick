@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 from werkzeug.utils import secure_filename
 from datetime import datetime
+from sqlalchemy.exc import IntegrityError
 import os
 
 from app.extensions import db
@@ -56,11 +57,21 @@ def update_profile():
     if err: return err
 
     data    = request.get_json(silent=True) or {}
-    allowed = ["full_name", "phone", "dob"]
+    allowed = ["full_name", "phone"]
 
     for field in allowed:
         if field in data:
             setattr(student, field, data[field])
+
+    if "dob" in data:
+        raw_dob = (data.get("dob") or "").strip()
+        if not raw_dob:
+            student.dob = None
+        else:
+            try:
+                student.dob = datetime.strptime(raw_dob, "%Y-%m-%d").date()
+            except ValueError:
+                return _error("dob must be in YYYY-MM-DD format")
 
     db.session.commit()
     return _ok({"message": "Profile updated", "student": student.to_dict()})
@@ -235,13 +246,6 @@ def apply(drive_id):
     if datetime.utcnow() > drive.application_deadline:
         return _error("Application deadline has passed")
 
-    # Duplicate application check (also enforced at DB level)
-    existing = Application.query.filter_by(
-        student_id=student.id, drive_id=drive_id
-    ).first()
-    if existing:
-        return _error("You have already applied to this drive")
-
     # Eligibility check
     is_eligible, reason = drive.check_student_eligibility(student)
     if not is_eligible:
@@ -252,8 +256,12 @@ def apply(drive_id):
         drive_id=drive_id,
         status="applied",
     )
-    db.session.add(application)
-    db.session.commit()
+    try:
+        db.session.add(application)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return _error("You have already applied to this drive", 409)
 
     return _ok({
         "message": f"Successfully applied to '{drive.title}'",
