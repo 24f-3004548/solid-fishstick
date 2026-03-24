@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import (
     create_access_token,
     create_refresh_token,
@@ -10,9 +10,14 @@ from flask_jwt_extended import (
     unset_jwt_cookies,
 )
 from werkzeug.security import generate_password_hash, check_password_hash
+from datetime import datetime, timedelta
+import hashlib
+import secrets
+from flask_mail import Message
 
-from app.extensions import db
-from app.models import User, Student, Company
+from app.extensions import db, mail
+from app.models import User, Student, Company, PasswordResetToken, Notification
+from app.utils.audit import log_audit
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -25,6 +30,10 @@ def _ok(data: dict, code=200):
     return jsonify({"success": True, **data}), code
 
 
+def _hash_token(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
 # ------------------------------------------------------------------ /register/student
 
 @auth_bp.route("/register/student", methods=["POST"])
@@ -32,7 +41,7 @@ def register_student():
     data = request.get_json(silent=True) or {}
 
     # --- required fields ---
-    required = ["email", "password", "full_name", "roll_number", "branch", "year", "cgpa"]
+    required = ["email", "password", "full_name", "roll_number", "phone", "dob", "branch", "year", "cgpa"]
     missing  = [f for f in required if not data.get(f)]
     if missing:
         return _error(f"Missing fields: {', '.join(missing)}")
@@ -61,6 +70,18 @@ def register_student():
     if len(data["password"]) < 6:
         return _error("Password must be at least 6 characters")
 
+    try:
+        dob = datetime.strptime(str(data["dob"]).strip(), "%Y-%m-%d").date()
+    except ValueError:
+        return _error("dob must be in YYYY-MM-DD format")
+
+    if dob >= datetime.utcnow().date():
+        return _error("dob must be a valid past date")
+
+    phone = str(data["phone"]).strip()
+    if len(phone) < 8 or len(phone) > 20:
+        return _error("phone must be between 8 and 20 characters")
+
     # --- create user + student ---
     user = User(
         email=email,
@@ -77,7 +98,8 @@ def register_student():
         branch=data["branch"],
         year=year,
         cgpa=cgpa,
-        phone=data.get("phone"),
+        phone=phone,
+        dob=dob,
     )
     db.session.add(student)
     db.session.commit()
@@ -250,9 +272,117 @@ def change_password():
         return _error("New password must be at least 6 characters")
 
     user.password_hash = generate_password_hash(new_pw)
+    log_audit(
+        actor_user_id=user.id,
+        action="auth.change_password",
+        entity_type="user",
+        entity_id=user.id,
+        details={},
+        ip_address=request.remote_addr,
+    )
     db.session.commit()
 
     return _ok({"message": "Password updated successfully"})
+
+
+# ------------------------------------------------------------------ /forgot-password
+
+@auth_bp.route("/forgot-password", methods=["POST"])
+def forgot_password():
+    data = request.get_json(silent=True) or {}
+    email = data.get("email", "").strip().lower()
+
+    generic_message = "If an account with that email exists, a reset link has been sent."
+    if not email:
+        return _ok({"message": generic_message})
+
+    user = User.query.filter_by(email=email).first()
+    if not user or not user.is_active:
+        return _ok({"message": generic_message})
+
+    PasswordResetToken.query.filter_by(user_id=user.id, used_at=None).update({"used_at": datetime.utcnow()})
+
+    raw_token = secrets.token_urlsafe(32)
+    token = PasswordResetToken(
+        user_id=user.id,
+        token_hash=_hash_token(raw_token),
+        expires_at=datetime.utcnow() + timedelta(
+            minutes=current_app.config.get("PASSWORD_RESET_TOKEN_EXPIRES_MINUTES", 30)
+        ),
+    )
+    db.session.add(token)
+    db.session.commit()
+
+    frontend_url = current_app.config.get("FRONTEND_URL", "http://127.0.0.1:8080").rstrip("/")
+    reset_link = f"{frontend_url}/#/reset-password?token={raw_token}"
+
+    try:
+        msg = Message(
+            subject="Placement Portal — Reset your password",
+            recipients=[user.email],
+            html=f"""
+            <div style=\"font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:0 auto\">
+              <h2 style=\"color:#1f2937\">Reset your password</h2>
+              <p style=\"color:#374151\">We received a request to reset your account password.</p>
+              <p><a href=\"{reset_link}\" style=\"background:#1a56db;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none\">Reset Password</a></p>
+              <p style=\"color:#6b7280;font-size:13px\">This link expires in {current_app.config.get('PASSWORD_RESET_TOKEN_EXPIRES_MINUTES', 30)} minutes.</p>
+            </div>
+            """,
+        )
+        mail.send(msg)
+    except Exception:
+        pass
+
+    return _ok({"message": generic_message})
+
+
+# ------------------------------------------------------------------ /reset-password
+
+@auth_bp.route("/reset-password", methods=["POST"])
+def reset_password():
+    data = request.get_json(silent=True) or {}
+    raw_token = data.get("token", "").strip()
+    new_password = data.get("new_password", "")
+
+    if not raw_token or not new_password:
+        return _error("Both token and new_password are required")
+
+    if len(new_password) < 6:
+        return _error("Password must be at least 6 characters")
+
+    token = PasswordResetToken.query.filter_by(token_hash=_hash_token(raw_token)).first()
+    if not token or not token.is_valid():
+        return _error("Invalid or expired reset token", 400)
+
+    user = token.user
+    if not user:
+        return _error("Invalid reset token", 400)
+
+    user.password_hash = generate_password_hash(new_password)
+    token.used_at = datetime.utcnow()
+    PasswordResetToken.query.filter(
+        PasswordResetToken.user_id == user.id,
+        PasswordResetToken.used_at.is_(None),
+        PasswordResetToken.id != token.id,
+    ).update({"used_at": datetime.utcnow()})
+
+    db.session.add(Notification(
+        user_id=user.id,
+        title="Password updated",
+        message="Your account password was reset successfully.",
+        type="success",
+    ))
+    log_audit(
+        actor_user_id=user.id,
+        action="auth.reset_password",
+        entity_type="user",
+        entity_id=user.id,
+        details={},
+        ip_address=request.remote_addr,
+    )
+    db.session.commit()
+
+    return _ok({"message": "Password reset successful. You can now log in."})
 
 
 # ------------------------------------------------------------------ private helper

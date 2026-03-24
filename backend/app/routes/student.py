@@ -6,7 +6,8 @@ from sqlalchemy.exc import IntegrityError
 import os
 
 from app.extensions import db
-from app.models import User, Student, Company, PlacementDrive, Application
+from app.models import User, Student, Company, PlacementDrive, Application, Notification
+from app.utils.audit import log_audit
 
 student_bp = Blueprint("student", __name__)
 
@@ -38,6 +39,13 @@ def _allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def _actor_user_id():
+    try:
+        return int(get_jwt_identity())
+    except (TypeError, ValueError):
+        return None
+
+
 # ==================================================================
 # PROFILE
 # ==================================================================
@@ -57,22 +65,20 @@ def update_profile():
     if err: return err
 
     data    = request.get_json(silent=True) or {}
-    allowed = ["full_name", "phone"]
+    if "phone" in data:
+        phone = str(data.get("phone") or "").strip()
+        if phone and (len(phone) < 8 or len(phone) > 20):
+            return _error("phone must be between 8 and 20 characters")
+        student.phone = phone
 
-    for field in allowed:
-        if field in data:
-            setattr(student, field, data[field])
-
-    if "dob" in data:
-        raw_dob = (data.get("dob") or "").strip()
-        if not raw_dob:
-            student.dob = None
-        else:
-            try:
-                student.dob = datetime.strptime(raw_dob, "%Y-%m-%d").date()
-            except ValueError:
-                return _error("dob must be in YYYY-MM-DD format")
-
+    log_audit(
+        actor_user_id=_actor_user_id(),
+        action="student.profile.update",
+        entity_type="student",
+        entity_id=student.id,
+        details={"fields": list(data.keys())},
+        ip_address=request.remote_addr,
+    )
     db.session.commit()
     return _ok({"message": "Profile updated", "student": student.to_dict()})
 
@@ -118,7 +124,7 @@ def dashboard():
     stats = {
         "total_applied":      len(apps),
         "shortlisted":        sum(1 for a in apps if a.status == "shortlisted"),
-        "selected":           sum(1 for a in apps if a.status == "selected"),
+        "selected":           sum(1 for a in apps if a.status in ("selected", "hired")),
         "rejected":           sum(1 for a in apps if a.status == "rejected"),
     }
 
@@ -258,6 +264,15 @@ def apply(drive_id):
     )
     try:
         db.session.add(application)
+        db.session.flush()
+        log_audit(
+            actor_user_id=_actor_user_id(),
+            action="student.apply",
+            entity_type="application",
+            entity_id=application.id,
+            details={"drive_id": drive_id},
+            ip_address=request.remote_addr,
+        )
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
@@ -319,9 +334,77 @@ def withdraw_application(app_id):
     if datetime.utcnow() > app.drive.application_deadline:
         return _error("Cannot withdraw after the deadline has passed")
 
+    log_audit(
+        actor_user_id=_actor_user_id(),
+        action="student.withdraw_application",
+        entity_type="application",
+        entity_id=app.id,
+        details={"drive_id": app.drive_id},
+        ip_address=request.remote_addr,
+    )
     db.session.delete(app)
     db.session.commit()
     return _ok({"message": "Application withdrawn successfully"})
+
+
+@student_bp.route("/applications/<int:app_id>/offer-response", methods=["PUT"])
+@jwt_required()
+def respond_to_offer(app_id):
+    """Student can accept or decline an offered application."""
+    student, err = _get_student()
+    if err: return err
+
+    app = Application.query.get_or_404(app_id)
+    if app.student_id != student.id:
+        return _error("Application not found", 404)
+
+    if app.status != "offered":
+        return _error(f"Offer response not allowed for status '{app.status}'")
+
+    data = request.get_json(silent=True) or {}
+    decision = (data.get("decision") or "").strip().lower()
+    if decision not in ("accept", "reject"):
+        return _error("decision must be one of: accept, reject")
+
+    note = (data.get("note") or "").strip()
+
+    if decision == "accept":
+        app.status = "hired"
+        student_message = f"You accepted the offer for '{app.drive.title}'."
+        company_message = f"{student.full_name} accepted the offer for '{app.drive.title}'."
+        company_notice_type = "success"
+    else:
+        app.status = "offer_declined"
+        student_message = f"You declined the offer for '{app.drive.title}'."
+        company_message = f"{student.full_name} declined the offer for '{app.drive.title}'."
+        company_notice_type = "warning"
+
+    if note:
+        app.remarks = f"{app.remarks or ''}\nStudent response note: {note}".strip()
+
+    db.session.add(Notification(
+        user_id=student.user_id,
+        title="Offer response recorded",
+        message=student_message,
+        type="info",
+    ))
+    db.session.add(Notification(
+        user_id=app.drive.company.user_id,
+        title="Offer response received",
+        message=company_message,
+        type=company_notice_type,
+    ))
+    log_audit(
+        actor_user_id=_actor_user_id(),
+        action="student.offer_response",
+        entity_type="application",
+        entity_id=app.id,
+        details={"decision": decision, "drive_id": app.drive_id},
+        ip_address=request.remote_addr,
+    )
+    db.session.commit()
+
+    return _ok({"message": student_message, "application": app.to_dict()})
 
 
 # ==================================================================
@@ -347,9 +430,12 @@ def placement_history():
         "history":  [a.to_dict() for a in apps],
         "summary": {
             "total":       len(apps),
-            "selected":    sum(1 for a in apps if a.status == "selected"),
+            "selected":    sum(1 for a in apps if a.status in ("selected", "hired")),
             "rejected":    sum(1 for a in apps if a.status == "rejected"),
             "shortlisted": sum(1 for a in apps if a.status == "shortlisted"),
+            "offered":     sum(1 for a in apps if a.status == "offered"),
+            "hired":       sum(1 for a in apps if a.status == "hired"),
+            "offer_declined": sum(1 for a in apps if a.status == "offer_declined"),
             "applied":     sum(1 for a in apps if a.status == "applied"),
         }
     })
@@ -369,6 +455,15 @@ def export_applications():
     # Import here to avoid circular imports
     from app.jobs.tasks import export_applications_csv
     job = export_applications_csv.delay(student.id)
+
+    log_audit(
+        actor_user_id=_actor_user_id(),
+        action="student.export_applications",
+        entity_type="student",
+        entity_id=student.id,
+        details={"job_id": job.id},
+        ip_address=request.remote_addr,
+    )
 
     return _ok({
         "message": "Export started. You will be notified when ready.",

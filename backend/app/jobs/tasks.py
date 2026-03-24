@@ -3,7 +3,8 @@ import io
 import csv
 from flask_mail import Message
 from app.extensions import celery, db
-from app.models import Student, PlacementDrive, Application, User
+from app.models import Student, PlacementDrive, Application, User, PasswordResetToken
+from app.utils.job_runs import record_job_run
 
 
 # ==================================================================
@@ -28,7 +29,9 @@ def send_daily_reminders():
     ).all()
 
     if not upcoming:
-        return {"status": "ok", "message": "No upcoming deadlines, no reminders sent"}
+      result = {"status": "ok", "message": "No upcoming deadlines, no reminders sent"}
+      record_job_run("jobs.send_daily_reminders", "success", result["message"], result)
+      return result
 
     students = Student.query.join(User).filter(User.is_active == True).all()
     sent = 0
@@ -58,7 +61,9 @@ def send_daily_reminders():
         except Exception as e:
             print(f"[reminder] Failed to send to {student.user.email}: {e}")
 
-    return {"status": "ok", "reminders_sent": sent}
+    result = {"status": "ok", "reminders_sent": sent}
+    record_job_run("jobs.send_daily_reminders", "success", f"Sent {sent} reminders", result)
+    return result
 
 
 # ==================================================================
@@ -122,9 +127,13 @@ def send_monthly_report():
             html=html,
         )
         mail.send(msg)
-        return {"status": "ok", "message": f"Monthly report sent to {admin_email}"}
+        result = {"status": "ok", "message": f"Monthly report sent to {admin_email}"}
+        record_job_run("jobs.send_monthly_report", "success", result["message"], result)
+        return result
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        result = {"status": "error", "message": str(e)}
+        record_job_run("jobs.send_monthly_report", "error", result["message"], result)
+        return result
 
 
 # ==================================================================
@@ -139,7 +148,9 @@ def export_applications_csv(student_id):
 
     student = Student.query.get(student_id)
     if not student:
-        return {"status": "error", "message": "Student not found"}
+      result = {"status": "error", "message": "Student not found"}
+      record_job_run("jobs.export_applications_csv", "error", result["message"], {"student_id": student_id})
+      return result
 
     apps = Application.query.filter_by(student_id=student_id)\
                             .order_by(Application.applied_at.desc()).all()
@@ -184,9 +195,43 @@ def export_applications_csv(student_id):
             data=csv_content,
         )
         mail.send(msg)
-        return {"status": "ok", "message": "CSV exported and emailed", "total": len(apps)}
+        result = {"status": "ok", "message": "CSV exported and emailed", "total": len(apps)}
+        record_job_run("jobs.export_applications_csv", "success", result["message"], {"student_id": student_id, "total": len(apps)})
+        return result
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        result = {"status": "error", "message": str(e)}
+        record_job_run("jobs.export_applications_csv", "error", result["message"], {"student_id": student_id})
+        return result
+
+
+# ==================================================================
+# d. SCHEDULED JOB — Cleanup expired password reset tokens
+# ==================================================================
+
+@celery.task(name="jobs.cleanup_expired_reset_tokens")
+def cleanup_expired_reset_tokens():
+    try:
+        now = datetime.utcnow()
+        deleted = (
+            PasswordResetToken.query
+            .filter(
+                db.or_(
+                    PasswordResetToken.expires_at < now,
+                    PasswordResetToken.used_at.isnot(None),
+                )
+            )
+            .delete(synchronize_session=False)
+        )
+        db.session.commit()
+
+        result = {"status": "ok", "deleted": deleted}
+        record_job_run("jobs.cleanup_expired_reset_tokens", "success", f"Deleted {deleted} tokens", result)
+        return result
+    except Exception as exc:
+        db.session.rollback()
+        result = {"status": "error", "message": str(exc)}
+        record_job_run("jobs.cleanup_expired_reset_tokens", "error", result["message"], result)
+        return result
 
 
 # ==================================================================

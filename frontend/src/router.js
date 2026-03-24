@@ -36,6 +36,8 @@ const routes = [
   // Auth
   { path: "/login",    component: LoginView,    beforeEnter: redirectIfLoggedIn },
   { path: "/register", component: RegisterView, beforeEnter: redirectIfLoggedIn },
+  { path: "/forgot-password", component: ForgotPasswordView, beforeEnter: redirectIfLoggedIn },
+  { path: "/reset-password", component: ResetPasswordView, beforeEnter: redirectIfLoggedIn },
 
   // Admin routes
   { path: "/admin/dashboard", component: AdminDashboard, beforeEnter: requireRole("admin") },

@@ -1,13 +1,34 @@
 // ── API base URL ────────────────────────────────────────────────────────────
+const API_HOST = window.location.hostname === "localhost"
+  ? "127.0.0.1"
+  : window.location.hostname;
+
 const API_BASE =
   window.__API_BASE__ ||
-  `${window.location.protocol}//${window.location.hostname}:5000/api`;
+  `${window.location.protocol}//${API_HOST}:5000/api`;
 
 // ── Reactive auth state ──────────────────────────────────────────────────────
+const initialLoggedIn = sessionStorage.getItem("is_logged_in") === "true";
+if (!initialLoggedIn) {
+  sessionStorage.removeItem("role");
+  sessionStorage.removeItem("user");
+}
+
 const authState = Vue.reactive({
-  role: sessionStorage.getItem("role"),
-  user: JSON.parse(sessionStorage.getItem("user") || "null"),
+  role: initialLoggedIn ? sessionStorage.getItem("role") : null,
+  user: initialLoggedIn ? JSON.parse(sessionStorage.getItem("user") || "null") : null,
+  is_logged_in: initialLoggedIn,
 });
+
+function emitAuthStateChanged() {
+  window.dispatchEvent(new CustomEvent("auth-state-changed", {
+    detail: {
+      role: authState.role,
+      user: authState.user,
+      isLoggedIn: authState.is_logged_in && !!authState.role,
+    },
+  }));
+}
 
 // ── Token helpers ───────────────────────────────────────────────────────────
 const Auth = {
@@ -20,16 +41,20 @@ const Auth = {
     sessionStorage.setItem("is_logged_in", "true");
     authState.role = data.role;
     authState.user = data.profile;
+    authState.is_logged_in = true;
+    emitAuthStateChanged();
   },
 
   clear() {
     ["role", "user", "is_logged_in"].forEach(k => sessionStorage.removeItem(k));
     authState.role = null;
     authState.user = null;
+    authState.is_logged_in = false;
+    emitAuthStateChanged();
   },
 
   isLoggedIn() {
-    return sessionStorage.getItem("is_logged_in") === "true" && !!authState.role;
+    return authState.is_logged_in && !!authState.role;
   },
 };
 
@@ -65,6 +90,14 @@ const ApiService = {
   registerCompany: (d) => api.post("/auth/register/company", d),
   logout:          ()  => api.post("/auth/logout"),
   me:              ()  => api.get("/auth/me"),
+  forgotPassword:  (d) => api.post("/auth/forgot-password", d),
+  resetPassword:   (d) => api.post("/auth/reset-password", d),
+
+  // Notifications
+  notifications:         (q)      => api.get("/notifications", { params: q }),
+  notificationsUnread:   ()       => api.get("/notifications/unread-count"),
+  notificationMarkRead:  (id)     => api.put(`/notifications/${id}/read`),
+  notificationsReadAll:  ()       => api.put("/notifications/read-all"),
 
   // Admin
   adminDashboard:      ()       => api.get("/admin/dashboard"),
@@ -77,6 +110,7 @@ const ApiService = {
   adminApproveCompany: (id)     => api.put(`/admin/companies/${id}/approve`),
   adminRejectCompany:  (id, d)  => api.put(`/admin/companies/${id}/reject`, d),
   adminBlacklistCo:    (id, d)  => api.put(`/admin/companies/${id}/blacklist`, d),
+  adminUnblacklistCo:  (id)     => api.put(`/admin/companies/${id}/unblacklist`),
   adminDrives:         (q)      => api.get("/admin/drives", { params: q }),
   adminApproveDrive:   (id)     => api.put(`/admin/drives/${id}/approve`),
   adminRejectDrive:    (id, d)  => api.put(`/admin/drives/${id}/reject`, d),
@@ -84,6 +118,8 @@ const ApiService = {
   adminApplications:   (q)      => api.get("/admin/applications", { params: q }),
   adminSearch:         (q)      => api.get("/admin/search", { params: { q } }),
   adminReport:         ()       => api.get("/admin/reports/summary"),
+  adminSystemHealth:   ()       => api.get("/admin/system/health"),
+  adminAuditLogs:      (q)      => api.get("/admin/audit-logs", { params: q }),
 
   // Company
   companyDashboard:    ()       => api.get("/company/dashboard"),
@@ -97,6 +133,7 @@ const ApiService = {
   companyApplications: (id, q)  => api.get(`/company/drives/${id}/applications`, { params: q }),
   companyApplication:  (id)     => api.get(`/company/applications/${id}`),
   companyUpdateApp:    (id, d)  => api.put(`/company/applications/${id}/status`, d),
+  companySendOffer:    (id, d)  => api.post(`/company/applications/${id}/offer-letter`, d),
   companyBulkUpdate:   (id, d)  => api.put(`/company/drives/${id}/applications/bulk-update`, d),
   companyHistory:      ()       => api.get("/company/history"),
 
@@ -115,6 +152,7 @@ const ApiService = {
   studentApply:        (id)     => api.post(`/student/drives/${id}/apply`),
   studentApplications: (q)      => api.get("/student/applications", { params: q }),
   studentApplication:  (id)     => api.get(`/student/applications/${id}`),
+  studentOfferResponse:(id, d)  => api.put(`/student/applications/${id}/offer-response`, d),
   studentWithdraw:     (id)     => api.delete(`/student/applications/${id}/withdraw`),
   studentHistory:      ()       => api.get("/student/history"),
   studentExport:       ()       => api.get("/student/applications/export"),

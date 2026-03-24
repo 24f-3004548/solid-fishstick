@@ -32,31 +32,41 @@ const RegisterView = {
 
         <!-- Student form -->
         <form v-if="role === 'student'" @submit.prevent="submitStudent">
+          <p class="form-legend">Fields marked with * are required.</p>
           <div class="row g-3">
             <div class="col-12">
-              <label class="form-label">Full name</label>
+              <label class="form-label label-required">Full name</label>
               <input v-model="student.full_name" class="form-control"
                 placeholder="Raj Kumar" required />
             </div>
             <div class="col-12">
-              <label class="form-label">Email address</label>
+              <label class="form-label label-required">Email address</label>
               <input v-model="student.email" type="email" class="form-control"
                 placeholder="raj@college.edu" required />
             </div>
             <div class="col-md-6">
-              <label class="form-label">Roll number</label>
+              <label class="form-label label-required">Roll number</label>
               <input v-model="student.roll_number" class="form-control"
                 placeholder="CS2024001" required />
             </div>
             <div class="col-md-6">
-              <label class="form-label">Branch</label>
+              <label class="form-label label-required">Phone number</label>
+              <input v-model="student.phone" class="form-control"
+                placeholder="+91XXXXXXXXXX" required />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label label-required">Date of birth</label>
+              <input v-model="student.dob" type="date" class="form-control" required />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label label-required">Branch</label>
               <select v-model="student.branch" class="form-select" required>
                 <option value="">Select branch</option>
                 <option v-for="b in branches" :key="b">{{ b }}</option>
               </select>
             </div>
             <div class="col-md-6">
-              <label class="form-label">Year</label>
+              <label class="form-label label-required">Year</label>
               <select v-model.number="student.year" class="form-select" required>
                 <option value="">Select year</option>
                 <option value="1">1st Year</option>
@@ -66,13 +76,14 @@ const RegisterView = {
               </select>
             </div>
             <div class="col-md-6">
-              <label class="form-label">CGPA</label>
+              <label class="form-label label-required">CGPA</label>
               <input v-model.number="student.cgpa" type="number"
                 min="0" max="10" step="0.01" class="form-control"
                 placeholder="8.5" required />
+              <div class="field-hint">Use a value between 0 and 10.</div>
             </div>
             <div class="col-12">
-              <label class="form-label">Password</label>
+              <label class="form-label label-required">Password</label>
               <input v-model="student.password" type="password"
                 class="form-control" placeholder="Min. 6 characters" required />
             </div>
@@ -87,24 +98,25 @@ const RegisterView = {
 
         <!-- Company form -->
         <form v-else @submit.prevent="submitCompany">
+          <p class="form-legend">Fields marked with * are required.</p>
           <div class="row g-3">
             <div class="col-12">
-              <label class="form-label">Company name</label>
+              <label class="form-label label-required">Company name</label>
               <input v-model="company.name" class="form-control"
                 placeholder="Acme Corp" required />
             </div>
             <div class="col-12">
-              <label class="form-label">Company email</label>
+              <label class="form-label label-required">Company email</label>
               <input v-model="company.email" type="email" class="form-control"
                 placeholder="hr@acme.com" required />
             </div>
             <div class="col-md-6">
-              <label class="form-label">HR contact name</label>
+              <label class="form-label label-required">HR contact name</label>
               <input v-model="company.hr_name" class="form-control"
                 placeholder="Jane Smith" required />
             </div>
             <div class="col-md-6">
-              <label class="form-label">HR email</label>
+              <label class="form-label label-required">HR email</label>
               <input v-model="company.hr_email" type="email"
                 class="form-control" placeholder="jane@acme.com" required />
             </div>
@@ -119,7 +131,7 @@ const RegisterView = {
                 placeholder="https://acme.com" />
             </div>
             <div class="col-12">
-              <label class="form-label">Password</label>
+              <label class="form-label label-required">Password</label>
               <input v-model="company.password" type="password"
                 class="form-control" placeholder="Min. 6 characters" required />
             </div>
@@ -152,7 +164,7 @@ const RegisterView = {
       error:   "",
       success: "",
       branches: ["CS","IT","ECE","EE","ME","CE","Chemical","Biotech"],
-      student: { full_name:"", email:"", password:"", roll_number:"", branch:"", year:"", cgpa:"" },
+      student: { full_name:"", email:"", password:"", roll_number:"", phone:"", dob:"", branch:"", year:"", cgpa:"" },
       company: { name:"", email:"", password:"", hr_name:"", hr_email:"", industry:"", website:"" },
     };
   },

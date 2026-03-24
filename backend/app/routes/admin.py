@@ -1,8 +1,14 @@
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt
+from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
+from sqlalchemy import text
+from datetime import datetime
+from urllib.parse import urlparse
+import socket
+import subprocess
 
-from app.extensions import db
-from app.models import User, Student, Company, PlacementDrive, Application
+from app.extensions import db, celery
+from app.models import User, Student, Company, PlacementDrive, Application, Notification, AuditLog, JobRun
+from app.utils.audit import log_audit
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -21,6 +27,77 @@ def _admin_required():
     return None
 
 
+def _actor_user_id():
+    try:
+        return int(get_jwt_identity())
+    except (TypeError, ValueError):
+        return None
+
+
+def _check_database():
+    try:
+        db.session.execute(text("SELECT 1"))
+        return {"status": "up"}
+    except Exception as exc:
+        return {"status": "down", "error": str(exc)}
+
+
+def _check_redis(redis_url: str):
+    try:
+        parsed = urlparse(redis_url)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 6379
+        timeout = 1.5
+        with socket.create_connection((host, port), timeout=timeout):
+            pass
+        return {"status": "up", "host": host, "port": port}
+    except Exception as exc:
+        return {"status": "down", "error": str(exc)}
+
+
+def _check_celery_worker():
+    try:
+        inspector = celery.control.inspect(timeout=1.5)
+        pings = inspector.ping() or {}
+        workers = list(pings.keys())
+        if workers:
+            return {"status": "up", "workers": workers, "worker_count": len(workers)}
+        return {"status": "down", "workers": [], "worker_count": 0}
+    except Exception as exc:
+        return {"status": "down", "error": str(exc), "workers": [], "worker_count": 0}
+
+
+def _check_celery_beat():
+    try:
+        process = subprocess.run(
+            ["pgrep", "-f", "celery.*beat"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if process.returncode == 0 and process.stdout.strip():
+            pids = [line.strip() for line in process.stdout.splitlines() if line.strip()]
+            return {"status": "up", "pids": pids}
+        return {"status": "down", "pids": []}
+    except Exception as exc:
+        return {"status": "unknown", "error": str(exc), "pids": []}
+
+
+def _check_mail_config():
+    from flask import current_app
+
+    required = ["MAIL_SERVER", "MAIL_PORT", "MAIL_USERNAME", "MAIL_PASSWORD"]
+    missing = [key for key in required if not current_app.config.get(key)]
+    if missing:
+        return {"status": "down", "missing": missing}
+    return {
+        "status": "up",
+        "server": current_app.config.get("MAIL_SERVER"),
+        "port": current_app.config.get("MAIL_PORT"),
+        "sender": current_app.config.get("MAIL_DEFAULT_SENDER"),
+    }
+
+
 # ==================================================================
 # DASHBOARD
 # ==================================================================
@@ -35,11 +112,11 @@ def dashboard():
         "stats": {
             "total_students":      Student.query.count(),
             "total_companies":     Company.query.count(),
-            "total_drives":        PlacementDrive.query.count(),
+            "total_drives":        PlacementDrive.query.filter(PlacementDrive.status != "rejected").count(),
             "total_applications":  Application.query.count(),
             "pending_companies":   Company.query.filter_by(approval_status="pending").count(),
             "pending_drives":      PlacementDrive.query.filter_by(status="pending").count(),
-            "selected_students":   Application.query.filter_by(status="selected").count(),
+            "selected_students":   Application.query.filter(Application.status.in_(["selected", "hired"])).count(),
         }
     })
 
@@ -91,6 +168,20 @@ def approve_company(company_id):
     company.approval_status  = "approved"
     company.rejection_reason = None
     company.user.is_active   = True
+    db.session.add(Notification(
+        user_id=company.user_id,
+        title="Company approved",
+        message="Your company account has been approved by admin.",
+        type="success",
+    ))
+    log_audit(
+        actor_user_id=_actor_user_id(),
+        action="company.approve",
+        entity_type="company",
+        entity_id=company.id,
+        details={"name": company.name},
+        ip_address=request.remote_addr,
+    )
     db.session.commit()
     return _ok({"message": f"{company.name} has been approved"})
 
@@ -110,6 +201,20 @@ def reject_company(company_id):
     company.approval_status  = "rejected"
     company.rejection_reason = reason
     company.user.is_active   = False
+    db.session.add(Notification(
+        user_id=company.user_id,
+        title="Company rejected",
+        message=f"Your company account was rejected: {reason}",
+        type="danger",
+    ))
+    log_audit(
+        actor_user_id=_actor_user_id(),
+        action="company.reject",
+        entity_type="company",
+        entity_id=company.id,
+        details={"name": company.name, "reason": reason},
+        ip_address=request.remote_addr,
+    )
     db.session.commit()
     return _ok({"message": f"{company.name} has been rejected"})
 
@@ -129,9 +234,23 @@ def blacklist_company(company_id):
     company.is_blacklisted   = True
     company.blacklist_reason = reason
     company.user.is_active   = False
+    db.session.add(Notification(
+        user_id=company.user_id,
+        title="Company blacklisted",
+        message=f"Your company account has been blacklisted: {reason}",
+        type="danger",
+    ))
     for drive in company.drives:
         if drive.status in ("pending", "approved"):
             drive.status = "closed"
+    log_audit(
+        actor_user_id=_actor_user_id(),
+        action="company.blacklist",
+        entity_type="company",
+        entity_id=company.id,
+        details={"name": company.name, "reason": reason},
+        ip_address=request.remote_addr,
+    )
     db.session.commit()
     return _ok({"message": f"{company.name} blacklisted and all drives closed"})
 
@@ -146,6 +265,20 @@ def unblacklist_company(company_id):
     company.is_blacklisted   = False
     company.blacklist_reason = None
     company.user.is_active   = True
+    db.session.add(Notification(
+        user_id=company.user_id,
+        title="Company reinstated",
+        message="Your company account has been reinstated by admin.",
+        type="success",
+    ))
+    log_audit(
+        actor_user_id=_actor_user_id(),
+        action="company.unblacklist",
+        entity_type="company",
+        entity_id=company.id,
+        details={"name": company.name},
+        ip_address=request.remote_addr,
+    )
     db.session.commit()
     return _ok({"message": f"{company.name} has been reinstated"})
 
@@ -201,6 +334,20 @@ def blacklist_student(student_id):
     student.is_blacklisted   = True
     student.blacklist_reason = reason
     student.user.is_active   = False
+    db.session.add(Notification(
+        user_id=student.user_id,
+        title="Account blacklisted",
+        message=f"Your account has been blacklisted: {reason}",
+        type="danger",
+    ))
+    log_audit(
+        actor_user_id=_actor_user_id(),
+        action="student.blacklist",
+        entity_type="student",
+        entity_id=student.id,
+        details={"name": student.full_name, "reason": reason},
+        ip_address=request.remote_addr,
+    )
     db.session.commit()
     return _ok({"message": f"{student.full_name} has been blacklisted"})
 
@@ -215,6 +362,20 @@ def unblacklist_student(student_id):
     student.is_blacklisted   = False
     student.blacklist_reason = None
     student.user.is_active   = True
+    db.session.add(Notification(
+        user_id=student.user_id,
+        title="Account reinstated",
+        message="Your account has been reinstated by admin.",
+        type="success",
+    ))
+    log_audit(
+        actor_user_id=_actor_user_id(),
+        action="student.unblacklist",
+        entity_type="student",
+        entity_id=student.id,
+        details={"name": student.full_name},
+        ip_address=request.remote_addr,
+    )
     db.session.commit()
     return _ok({"message": f"{student.full_name} has been reinstated"})
 
@@ -257,6 +418,20 @@ def approve_drive(drive_id):
 
     drive.status           = "approved"
     drive.rejection_reason = None
+    db.session.add(Notification(
+        user_id=drive.company.user_id,
+        title="Drive approved",
+        message=f"Your drive '{drive.title}' has been approved by admin.",
+        type="success",
+    ))
+    log_audit(
+        actor_user_id=_actor_user_id(),
+        action="drive.approve",
+        entity_type="drive",
+        entity_id=drive.id,
+        details={"title": drive.title},
+        ip_address=request.remote_addr,
+    )
     db.session.commit()
     return _ok({"message": f'Drive "{drive.title}" has been approved'})
 
@@ -275,6 +450,20 @@ def reject_drive(drive_id):
 
     drive.status           = "rejected"
     drive.rejection_reason = reason
+    db.session.add(Notification(
+        user_id=drive.company.user_id,
+        title="Drive rejected",
+        message=f"Your drive '{drive.title}' was rejected: {reason}",
+        type="danger",
+    ))
+    log_audit(
+        actor_user_id=_actor_user_id(),
+        action="drive.reject",
+        entity_type="drive",
+        entity_id=drive.id,
+        details={"title": drive.title, "reason": reason},
+        ip_address=request.remote_addr,
+    )
     db.session.commit()
     return _ok({"message": f'Drive "{drive.title}" has been rejected'})
 
@@ -287,8 +476,41 @@ def close_drive(drive_id):
 
     drive        = PlacementDrive.query.get_or_404(drive_id)
     drive.status = "closed"
+    log_audit(
+        actor_user_id=_actor_user_id(),
+        action="drive.close",
+        entity_type="drive",
+        entity_id=drive.id,
+        details={"title": drive.title},
+        ip_address=request.remote_addr,
+    )
     db.session.commit()
     return _ok({"message": f'Drive "{drive.title}" has been closed'})
+
+
+# ==================================================================
+# AUDIT LOGS
+# ==================================================================
+
+@admin_bp.route("/audit-logs", methods=["GET"])
+@jwt_required()
+def list_audit_logs():
+    err = _admin_required()
+    if err: return err
+
+    action = request.args.get("action", "").strip()
+    entity_type = request.args.get("entity_type", "").strip()
+    limit = request.args.get("limit", default=100, type=int)
+    limit = max(1, min(limit, 500))
+
+    query = AuditLog.query
+    if action:
+        query = query.filter(AuditLog.action.ilike(f"%{action}%"))
+    if entity_type:
+        query = query.filter(AuditLog.entity_type == entity_type)
+
+    logs = query.order_by(AuditLog.created_at.desc()).limit(limit).all()
+    return _ok({"logs": [item.to_dict() for item in logs], "total": len(logs)})
 
 
 # ==================================================================
@@ -361,14 +583,14 @@ def reports_summary():
 
     apps_by_status = {
         s: Application.query.filter_by(status=s).count()
-        for s in ("applied", "shortlisted", "selected", "rejected", "waiting")
+        for s in ("applied", "shortlisted", "offered", "hired", "selected", "rejected", "offer_declined", "waiting")
     }
 
     top_companies = (
         db.session.query(Company.name, db.func.count(Application.id).label("selected"))
         .join(PlacementDrive, PlacementDrive.company_id == Company.id)
         .join(Application, Application.drive_id == PlacementDrive.id)
-        .filter(Application.status == "selected")
+        .filter(Application.status.in_(["selected", "hired"]))
         .group_by(Company.id)
         .order_by(db.desc("selected"))
         .limit(5)
@@ -383,5 +605,52 @@ def reports_summary():
                 {"company": name, "selected": count}
                 for name, count in top_companies
             ],
+        }
+    })
+
+
+# ==================================================================
+# SYSTEM HEALTH
+# ==================================================================
+
+@admin_bp.route("/system/health", methods=["GET"])
+@jwt_required()
+def system_health():
+    err = _admin_required()
+    if err: return err
+
+    components = {
+        "api": {"status": "up"},
+        "database": _check_database(),
+        "redis": _check_redis(celery.conf.get("broker_url") or "redis://localhost:6379/0"),
+        "celery_worker": _check_celery_worker(),
+        "celery_beat": _check_celery_beat(),
+        "mail": _check_mail_config(),
+    }
+
+    critical = ["database", "redis", "celery_worker"]
+    overall_status = "up" if all(components[key].get("status") == "up" for key in critical) else "degraded"
+
+    tracked_jobs = [
+        "jobs.send_daily_reminders",
+        "jobs.send_monthly_report",
+        "jobs.cleanup_expired_reset_tokens",
+    ]
+    latest_runs = {}
+    for job_name in tracked_jobs:
+        run = (
+            JobRun.query
+            .filter_by(job_name=job_name)
+            .order_by(JobRun.created_at.desc())
+            .first()
+        )
+        latest_runs[job_name] = run.to_dict() if run else None
+
+    return _ok({
+        "health": {
+            "status": overall_status,
+            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "components": components,
+            "job_runs": latest_runs,
         }
     })

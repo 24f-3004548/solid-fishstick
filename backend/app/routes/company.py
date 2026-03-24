@@ -1,9 +1,11 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
-from datetime import datetime
+from datetime import datetime, timezone
+from flask_mail import Message
 
-from app.extensions import db
-from app.models import User, Student, Company, PlacementDrive, Application
+from app.extensions import db, mail
+from app.models import User, Student, Company, PlacementDrive, Application, Notification
+from app.utils.audit import log_audit
 
 company_bp = Blueprint("company", __name__)
 
@@ -32,6 +34,13 @@ def _get_company():
     return company, None
 
 
+def _actor_user_id():
+    try:
+        return int(get_jwt_identity())
+    except (TypeError, ValueError):
+        return None
+
+
 def _normalize_eligible_years(raw):
     if raw is None:
         return None
@@ -48,6 +57,41 @@ def _normalize_eligible_years(raw):
             return None
         parsed.append(str(year))
     return ",".join(parsed)
+
+
+def _normalize_salary_lpa(raw):
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        raw = raw.strip()
+        if raw == "":
+            return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if value < 0:
+        return None
+    return value
+
+
+def _parse_iso_datetime(value, field_name):
+    raw = str(value or "").strip()
+    if not raw:
+        raise ValueError(f"{field_name} must be ISO format: YYYY-MM-DDTHH:MM:SS")
+
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must be ISO format: YYYY-MM-DDTHH:MM:SS") from exc
+
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+
+    return parsed
 
 
 # ==================================================================
@@ -102,7 +146,7 @@ def dashboard():
         "total_applicants":  sum(len(d.applications) for d in drives),
         "total_selected":    sum(
             1 for d in drives
-            for a in d.applications if a.status == "selected"
+            for a in d.applications if a.status in ("selected", "hired")
         ),
     }
 
@@ -164,9 +208,9 @@ def create_drive():
 
     # Parse deadline
     try:
-        deadline = datetime.fromisoformat(data["application_deadline"])
-    except ValueError:
-        return _error("application_deadline must be ISO format: YYYY-MM-DDTHH:MM:SS")
+        deadline = _parse_iso_datetime(data["application_deadline"], "application_deadline")
+    except ValueError as exc:
+        return _error(str(exc))
 
     if deadline <= datetime.utcnow():
         return _error("Application deadline must be in the future")
@@ -175,9 +219,9 @@ def create_drive():
     drive_date = None
     if data.get("drive_date"):
         try:
-            drive_date = datetime.fromisoformat(data["drive_date"])
-        except ValueError:
-            return _error("drive_date must be ISO format: YYYY-MM-DDTHH:MM:SS")
+            drive_date = _parse_iso_datetime(data["drive_date"], "drive_date")
+        except ValueError as exc:
+            return _error(str(exc))
 
     # Validate min_cgpa if provided
     min_cgpa = data.get("min_cgpa", 0.0)
@@ -192,13 +236,17 @@ def create_drive():
     if data.get("eligible_years") is not None and eligible_years is None:
         return _error("eligible_years must be comma-separated values from 1,2,3,4")
 
+    salary_lpa = _normalize_salary_lpa(data.get("salary_lpa"))
+    if data.get("salary_lpa") not in (None, "") and salary_lpa is None:
+        return _error("salary_lpa must be a non-negative number")
+
     drive = PlacementDrive(
         company_id=company.id,
         title=data["title"],
         description=data["description"],
         job_type=data.get("job_type"),
         location=data.get("location"),
-        salary_lpa=data.get("salary_lpa"),
+        salary_lpa=salary_lpa,
         eligible_branches=data.get("eligible_branches"),   # "CS,IT,ECE"
         eligible_years=eligible_years,                      # "3,4"
         min_cgpa=min_cgpa,
@@ -207,6 +255,15 @@ def create_drive():
         status="pending",   # Admin must approve before students can see it
     )
     db.session.add(drive)
+    db.session.flush()
+    log_audit(
+        actor_user_id=_actor_user_id(),
+        action="drive.create",
+        entity_type="drive",
+        entity_id=drive.id,
+        details={"title": drive.title, "company_id": company.id},
+        ip_address=request.remote_addr,
+    )
     db.session.commit()
 
     return _ok({
@@ -229,9 +286,7 @@ def update_drive(drive_id):
         return _error("Cannot edit a closed drive")
 
     data    = request.get_json(silent=True) or {}
-    allowed = ["title", "description", "job_type", "location",
-               "salary_lpa", "eligible_branches", "eligible_years",
-               "min_cgpa", "drive_date"]
+    allowed = ["title", "description", "job_type", "location", "eligible_branches", "min_cgpa"]
 
     for field in allowed:
         if field in data:
@@ -245,14 +300,34 @@ def update_drive(drive_id):
 
     if "application_deadline" in data:
         try:
-            drive.application_deadline = datetime.fromisoformat(data["application_deadline"])
-        except ValueError:
-            return _error("application_deadline must be ISO format")
+            drive.application_deadline = _parse_iso_datetime(data["application_deadline"], "application_deadline")
+        except ValueError as exc:
+            return _error(str(exc))
+
+    if "drive_date" in data and data.get("drive_date"):
+        try:
+            drive.drive_date = _parse_iso_datetime(data["drive_date"], "drive_date")
+        except ValueError as exc:
+            return _error(str(exc))
+
+    if "salary_lpa" in data:
+        salary_lpa = _normalize_salary_lpa(data.get("salary_lpa"))
+        if data.get("salary_lpa") not in (None, "") and salary_lpa is None:
+            return _error("salary_lpa must be a non-negative number")
+        drive.salary_lpa = salary_lpa
 
     # Editing an approved drive resets it to pending (needs re-approval)
     if drive.status == "approved":
         drive.status = "pending"
 
+    log_audit(
+        actor_user_id=_actor_user_id(),
+        action="drive.update",
+        entity_type="drive",
+        entity_id=drive.id,
+        details={"title": drive.title, "company_id": company.id},
+        ip_address=request.remote_addr,
+    )
     db.session.commit()
     return _ok({"message": "Drive updated and resubmitted for approval", "drive": drive.to_dict()})
 
@@ -268,6 +343,14 @@ def close_drive(drive_id):
         return _error("Drive does not belong to your company", 403)
 
     drive.status = "closed"
+    log_audit(
+        actor_user_id=_actor_user_id(),
+        action="drive.close_by_company",
+        entity_type="drive",
+        entity_id=drive.id,
+        details={"title": drive.title, "company_id": company.id},
+        ip_address=request.remote_addr,
+    )
     db.session.commit()
     return _ok({"message": f'Drive "{drive.title}" has been closed'})
 
@@ -323,9 +406,12 @@ def update_application_status(app_id):
     data       = request.get_json(silent=True) or {}
     new_status = data.get("status", "").strip()
 
-    valid_statuses = ("shortlisted", "waiting", "selected", "rejected")
+    valid_statuses = ("shortlisted", "waiting", "offered", "hired", "selected", "rejected", "offer_declined")
     if new_status not in valid_statuses:
         return _error(f"Status must be one of: {', '.join(valid_statuses)}")
+
+    if new_status == "hired" and app.status not in ("offered", "selected"):
+        return _error("Application must be offered before marking as hired")
 
     app.status = new_status
 
@@ -334,14 +420,103 @@ def update_application_status(app_id):
         app.interview_type = data["interview_type"]
     if "interview_date" in data:
         try:
-            app.interview_date = datetime.fromisoformat(data["interview_date"])
-        except ValueError:
-            return _error("interview_date must be ISO format")
+            app.interview_date = _parse_iso_datetime(data["interview_date"], "interview_date")
+        except ValueError as exc:
+            return _error(str(exc))
+    if "interview_date" in data and not data.get("interview_date"):
+        app.interview_date = None
+    if "offer_letter_url" in data:
+        offer_link = str(data.get("offer_letter_url") or "").strip()
+        app.remarks = offer_link or app.remarks
+    if "offer_message" in data:
+        message = str(data.get("offer_message") or "").strip()
+        if message:
+            app.remarks = message
     if "remarks" in data:
         app.remarks = data["remarks"]
 
     db.session.commit()
+    db.session.add(Notification(
+        user_id=app.student.user_id,
+        title="Application updated",
+        message=f"Your application for '{app.drive.title}' is now '{new_status}'.",
+        type="info" if new_status in ("applied", "waiting") else ("success" if new_status == "selected" else ("danger" if new_status == "rejected" else "warning")),
+    ))
+    log_audit(
+        actor_user_id=_actor_user_id(),
+        action="application.update_status",
+        entity_type="application",
+        entity_id=app.id,
+        details={"new_status": new_status, "drive_id": app.drive_id},
+        ip_address=request.remote_addr,
+    )
+    db.session.commit()
     return _ok({"message": f"Application status updated to '{new_status}'", "application": app.to_dict()})
+
+
+@company_bp.route("/applications/<int:app_id>/offer-letter", methods=["POST"])
+@jwt_required()
+def send_offer_letter(app_id):
+    company, err = _get_company()
+    if err: return err
+
+    app = Application.query.get_or_404(app_id)
+    if app.drive.company_id != company.id:
+        return _error("Application does not belong to your company", 403)
+
+    data = request.get_json(silent=True) or {}
+    offer_link = str(data.get("offer_letter_url") or "").strip()
+    offer_message = str(data.get("message") or "").strip()
+
+    if not offer_link:
+        return _error("offer_letter_url is required")
+
+    student_email = app.student.user.email if app.student and app.student.user else None
+    if not student_email:
+        return _error("Student email not found", 400)
+
+    subject = f"Offer letter — {app.drive.title}"
+    body_message = offer_message or (
+        f"Congratulations! You have received an offer for '{app.drive.title}' at {company.name}."
+    )
+
+    try:
+        msg = Message(
+            subject=subject,
+            recipients=[student_email],
+            html=f"""
+            <div style=\"font-family:'Segoe UI',Arial,sans-serif;max-width:600px;margin:0 auto\">
+              <h2 style=\"color:#1f2937\">Offer Letter</h2>
+              <p style=\"color:#374151\">{body_message}</p>
+              <p><a href=\"{offer_link}\" style=\"background:#1a56db;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none\">View Offer Letter</a></p>
+            </div>
+            """,
+        )
+        mail.send(msg)
+    except Exception:
+        current_app.logger.exception("Failed to send offer letter email for application %s", app.id)
+        return _error("Could not send offer letter email at the moment", 500)
+
+    app.status = "offered"
+    app.remarks = offer_link
+
+    db.session.add(Notification(
+        user_id=app.student.user_id,
+        title="Offer letter received",
+        message=f"You received an offer letter for '{app.drive.title}'. Check your email.",
+        type="success",
+    ))
+    log_audit(
+        actor_user_id=_actor_user_id(),
+        action="application.offer_letter.sent",
+        entity_type="application",
+        entity_id=app.id,
+        details={"drive_id": app.drive_id, "offer_letter_url": offer_link},
+        ip_address=request.remote_addr,
+    )
+    db.session.commit()
+
+    return _ok({"message": "Offer letter sent and application marked as offered", "application": app.to_dict()})
 
 
 @company_bp.route("/drives/<int:drive_id>/applications/bulk-update", methods=["PUT"])
@@ -359,7 +534,7 @@ def bulk_update_applications(drive_id):
     app_ids    = data.get("application_ids", [])
     new_status = data.get("status", "").strip()
 
-    valid_statuses = ("shortlisted", "waiting", "selected", "rejected")
+    valid_statuses = ("shortlisted", "waiting", "offered", "hired", "selected", "rejected", "offer_declined")
     if new_status not in valid_statuses:
         return _error(f"Status must be one of: {', '.join(valid_statuses)}")
 
@@ -370,9 +545,25 @@ def bulk_update_applications(drive_id):
     for app_id in app_ids:
         app = Application.query.get(app_id)
         if app and app.drive_id == drive_id:
+            if new_status == "hired" and app.status not in ("offered", "selected"):
+                continue
             app.status = new_status
+            db.session.add(Notification(
+                user_id=app.student.user_id,
+                title="Application updated",
+                message=f"Your application for '{app.drive.title}' is now '{new_status}'.",
+                type="info" if new_status in ("applied", "waiting") else ("success" if new_status == "selected" else ("danger" if new_status == "rejected" else "warning")),
+            ))
             updated += 1
 
+    log_audit(
+        actor_user_id=_actor_user_id(),
+        action="application.bulk_update_status",
+        entity_type="drive",
+        entity_id=drive_id,
+        details={"new_status": new_status, "updated": updated},
+        ip_address=request.remote_addr,
+    )
     db.session.commit()
     return _ok({"message": f"{updated} applications updated to '{new_status}'"})
 
@@ -392,7 +583,7 @@ def placement_history():
         .join(PlacementDrive)
         .filter(
             PlacementDrive.company_id == company.id,
-            Application.status == "selected"
+            Application.status.in_(["selected", "hired"])
         )
         .order_by(Application.updated_at.desc())
         .all()

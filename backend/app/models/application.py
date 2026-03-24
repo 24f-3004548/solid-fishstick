@@ -43,6 +43,7 @@ class Application(db.Model):
             "interview_date": self.interview_date.isoformat() if self.interview_date else None,
             "remarks":        self.remarks,
             "applied_at":     self.applied_at.isoformat(),
+            "updated_at":     self.updated_at.isoformat() if self.updated_at else None,
         }
 
     def __repr__(self):

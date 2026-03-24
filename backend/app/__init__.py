@@ -22,7 +22,9 @@ def create_app(env: str = "development") -> Flask:
         raise RuntimeError(f"Missing required config values: {', '.join(missing)}")
 
     # Extensions
-    CORS(app, supports_credentials=True, origins=[app.config["FRONTEND_URL"]])
+    configured_origins = app.config.get("FRONTEND_URLS", [app.config["FRONTEND_URL"]])
+    local_dev_origins = [r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"]
+    CORS(app, supports_credentials=True, origins=[*configured_origins, *local_dev_origins])
     db.init_app(app)
     jwt.init_app(app)
     mail.init_app(app)
@@ -35,11 +37,13 @@ def create_app(env: str = "development") -> Flask:
     from app.routes.auth    import auth_bp
     from app.routes.admin   import admin_bp
     from app.routes.company import company_bp
+    from app.routes.notifications import notifications_bp
     from app.routes.student import student_bp
 
     app.register_blueprint(auth_bp,    url_prefix="/api/auth")
     app.register_blueprint(admin_bp,   url_prefix="/api/admin")
     app.register_blueprint(company_bp, url_prefix="/api/company")
+    app.register_blueprint(notifications_bp, url_prefix="/api/notifications")
     app.register_blueprint(student_bp, url_prefix="/api/student")
 
     # Create tables + seed admin

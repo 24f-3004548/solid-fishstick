@@ -21,12 +21,6 @@ const StudentDashboard = {
       </div>
     </div>
 
-    <!-- Alert -->
-    <div v-if="alert.msg" :class="['pp-alert alert-'+alert.type+' mb-4']">
-      <i :class="alert.type==='success'?'bi bi-check-circle-fill':'bi bi-exclamation-circle-fill'"></i>
-      {{ alert.msg }}
-    </div>
-
     <!-- Tabs -->
     <ul class="nav nav-pills mb-4" style="gap:.5rem">
       <li class="nav-item" v-for="t in tabs" :key="t.key">
@@ -261,10 +255,33 @@ const StudentDashboard = {
                 <i class="bi bi-chat-left-text me-1"></i>{{ a.remarks }}
               </div>
             </div>
-            <button v-if="a.status==='applied'" class="btn btn-sm btn-outline-danger"
-              @click="withdrawApp(a)">
-              <i class="bi bi-x-circle me-1"></i>Withdraw
-            </button>
+            <div class="d-flex flex-column gap-2 align-items-stretch">
+              <button
+                v-if="a.status==='offered'"
+                class="btn btn-sm btn-outline-primary"
+                @click="viewOffer(a)"
+              >
+                <i class="bi bi-file-earmark-text me-1"></i>View offer
+              </button>
+              <button
+                v-if="a.status==='offered'"
+                class="btn btn-sm btn-success"
+                @click="respondToOffer(a, 'accept')"
+              >
+                <i class="bi bi-check2-circle me-1"></i>Accept offer
+              </button>
+              <button
+                v-if="a.status==='offered'"
+                class="btn btn-sm btn-outline-danger"
+                @click="respondToOffer(a, 'reject')"
+              >
+                <i class="bi bi-x-circle me-1"></i>Decline offer
+              </button>
+              <button v-if="a.status==='applied'" class="btn btn-sm btn-outline-danger"
+                @click="withdrawApp(a)">
+                <i class="bi bi-x-circle me-1"></i>Withdraw
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -319,16 +336,19 @@ const StudentDashboard = {
           <div class="pp-card">
             <h6 class="fw-600 mb-3">Personal details</h6>
             <div class="mb-3">
-              <label class="form-label">Full name</label>
-              <input v-model="profileForm.full_name" class="form-control"/>
+              <label class="form-label label-required">Full name</label>
+              <input v-model="profileForm.full_name" class="form-control" readonly disabled />
+              <div class="readonly-hint">Locked after registration.</div>
             </div>
             <div class="mb-3">
-              <label class="form-label">Phone</label>
-              <input v-model="profileForm.phone" class="form-control" placeholder="+91 XXXXXXXXXX"/>
+              <label class="form-label label-required">Phone</label>
+              <input v-model="profileForm.phone" class="form-control" placeholder="+91 XXXXXXXXXX" required />
+              <div class="field-hint">Use an active number for recruiter contact.</div>
             </div>
             <div class="mb-4">
-              <label class="form-label">Date of birth</label>
-              <input v-model="profileForm.dob" type="date" class="form-control"/>
+              <label class="form-label label-required">Date of birth</label>
+              <input v-model="profileForm.dob" type="date" class="form-control" readonly disabled />
+              <div class="readonly-hint">Locked after registration.</div>
             </div>
             <button class="btn btn-primary w-100" @click="saveProfile" :disabled="savingProfile">
               <span v-if="savingProfile" class="spinner-border spinner-border-sm me-2"></span>
@@ -411,13 +431,15 @@ const StudentDashboard = {
       driveJobType:  "",
       eligibleOnly:  false,
       appStatusFilter: "",
-      appStatuses:   ["applied","shortlisted","waiting","selected","rejected"],
+      appStatuses:   ["applied","shortlisted","waiting","offered","hired","selected","offer_declined","rejected"],
       profileForm:   { full_name: "", phone: "", dob: "" },
       savingProfile: false,
       resumeFile:    null,
       uploadingResume: false,
       alert:         { msg: "", type: "success" },
       _searchTimer:  null,
+      _refreshTimer: null,
+      _onWindowFocus: null,
     };
   },
 
@@ -434,6 +456,9 @@ const StudentDashboard = {
       const h = this.history;
       return [
         { key: "applied",     label: "Total applied",  value: h.length },
+        { key: "offered",     label: "Offered",        value: h.filter(a=>a.status==="offered").length },
+        { key: "hired",       label: "Hired",          value: h.filter(a=>a.status==="hired").length },
+        { key: "offer_declined", label: "Declined",    value: h.filter(a=>a.status==="offer_declined").length },
         { key: "selected",    label: "Selected",       value: h.filter(a=>a.status==="selected").length },
         { key: "shortlisted", label: "Shortlisted",    value: h.filter(a=>a.status==="shortlisted").length },
         { key: "rejected",    label: "Rejected",       value: h.filter(a=>a.status==="rejected").length },
@@ -451,10 +476,26 @@ const StudentDashboard = {
 
   async mounted() {
     await this.fetchDashboard();
+    this._onWindowFocus = () => this.refreshCurrentView(true);
+    window.addEventListener("focus", this._onWindowFocus);
+    this._refreshTimer = setInterval(() => this.refreshCurrentView(true), 30000);
+  },
+
+  beforeUnmount() {
+    if (this._searchTimer) clearTimeout(this._searchTimer);
+    if (this._refreshTimer) clearInterval(this._refreshTimer);
+    if (this._onWindowFocus) window.removeEventListener("focus", this._onWindowFocus);
   },
 
   methods: {
-    async fetchDashboard() {
+    async refreshCurrentView(silent = false) {
+      await this.fetchDashboard(silent);
+      if (this.activeTab === "drives") await this.fetchDrives(silent);
+      if (this.activeTab === "applications") await this.fetchApplications(silent);
+      if (this.activeTab === "history") await this.fetchHistory(silent);
+    },
+
+    async fetchDashboard(silent = false) {
       this.loadingDash = true;
       try {
         const { data } = await ApiService.studentDashboard();
@@ -466,11 +507,13 @@ const StudentDashboard = {
         this.profileForm.full_name = this.student.full_name;
         this.profileForm.phone     = this.student.phone || "";
         this.profileForm.dob       = this.student.dob   || "";
-      } catch { this.showAlert("Failed to load dashboard", "danger"); }
+      } catch {
+        if (!silent) this.showAlert("Failed to load dashboard", "danger");
+      }
       finally  { this.loadingDash = false; }
     },
 
-    async fetchDrives() {
+    async fetchDrives(silent = false) {
       this.loadingDrives = true;
       try {
         const params = {};
@@ -479,7 +522,9 @@ const StudentDashboard = {
         if (this.eligibleOnly) params.eligible_only = "true";
         const { data } = await ApiService.studentDrives(params);
         this.allDrives = data.drives;
-      } catch { this.showAlert("Failed to load drives", "danger"); }
+      } catch {
+        if (!silent) this.showAlert("Failed to load drives", "danger");
+      }
       finally  { this.loadingDrives = false; }
     },
 
@@ -488,22 +533,26 @@ const StudentDashboard = {
       this._searchTimer = setTimeout(() => this.fetchDrives(), 400);
     },
 
-    async fetchApplications() {
+    async fetchApplications(silent = false) {
       this.loadingApps = true;
       try {
         const params = this.appStatusFilter ? { status: this.appStatusFilter } : {};
         const { data } = await ApiService.studentApplications(params);
         this.myApplications = data.applications;
-      } catch { this.showAlert("Failed to load applications", "danger"); }
+      } catch {
+        if (!silent) this.showAlert("Failed to load applications", "danger");
+      }
       finally  { this.loadingApps = false; }
     },
 
-    async fetchHistory() {
+    async fetchHistory(silent = false) {
       this.loadingHistory = true;
       try {
         const { data } = await ApiService.studentHistory();
         this.history = data.history;
-      } catch { this.showAlert("Failed to load history", "danger"); }
+      } catch {
+        if (!silent) this.showAlert("Failed to load history", "danger");
+      }
       finally  { this.loadingHistory = false; }
     },
 
@@ -513,6 +562,7 @@ const StudentDashboard = {
         await ApiService.studentApply(drive.id);
         drive.already_applied = true;
         this.stats.total_applied++;
+        await this.refreshCurrentView(true);
         this.showAlert(`Applied to "${drive.title}" successfully!`, "success");
       } catch (e) {
         this.showAlert(e.response?.data?.message || "Failed to apply", "danger");
@@ -525,17 +575,52 @@ const StudentDashboard = {
         await ApiService.studentWithdraw(app.id);
         this.myApplications = this.myApplications.filter(a => a.id !== app.id);
         this.stats.total_applied--;
+        await this.refreshCurrentView(true);
         this.showAlert("Application withdrawn", "success");
       } catch (e) {
         this.showAlert(e.response?.data?.message || "Cannot withdraw", "danger");
       }
     },
 
+    viewOffer(app) {
+      const text = app.remarks || "No offer document link provided.";
+      const match = text.match(/https?:\/\/\S+/i);
+      if (match && confirm("Open offer document link in a new tab?")) {
+        window.open(match[0], "_blank", "noopener,noreferrer");
+        return;
+      }
+      this.showAlert(text, "info");
+    },
+
+    async respondToOffer(app, decision) {
+      const isAccept = decision === "accept";
+      const actionText = isAccept ? "accept" : "decline";
+      if (!confirm(`Are you sure you want to ${actionText} this offer?`)) return;
+
+      let note = "";
+      if (!isAccept) {
+        note = prompt("Optional: share a reason for declining") || "";
+      }
+
+      try {
+        const { data } = await ApiService.studentOfferResponse(app.id, { decision, note });
+        app.status = data.application?.status || (isAccept ? "hired" : "offer_declined");
+        app.remarks = data.application?.remarks || app.remarks;
+        await this.refreshCurrentView(true);
+        this.showAlert(data.message || `Offer ${isAccept ? "accepted" : "declined"}`, isAccept ? "success" : "warning");
+      } catch (e) {
+        this.showAlert(e.response?.data?.message || "Failed to submit offer response", "danger");
+      }
+    },
+
     async saveProfile() {
       this.savingProfile = true;
       try {
-        const { data } = await ApiService.studentUpdateProfile(this.profileForm);
+        const { data } = await ApiService.studentUpdateProfile({ phone: this.profileForm.phone });
         this.student = { ...this.student, ...data.student };
+        this.profileForm.full_name = this.student.full_name || "";
+        this.profileForm.phone = this.student.phone || "";
+        this.profileForm.dob = this.student.dob || "";
         this.showAlert("Profile updated successfully", "success");
       } catch { this.showAlert("Failed to update profile", "danger"); }
       finally  { this.savingProfile = false; }
@@ -568,8 +653,9 @@ const StudentDashboard = {
     },
 
     showAlert(msg, type = "success") {
-      this.alert = { msg, type };
-      setTimeout(() => this.alert.msg = "", 4000);
+      if (typeof window.ppToast === "function") {
+        window.ppToast(msg, type);
+      }
     },
   }
 };

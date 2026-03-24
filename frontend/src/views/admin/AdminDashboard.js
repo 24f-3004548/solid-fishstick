@@ -17,12 +17,6 @@ const AdminDashboard = {
       </div>
     </div>
 
-    <!-- Alert -->
-    <div v-if="alert.msg" :class="['pp-alert alert-'+alert.type+' mb-4']">
-      <i :class="alert.type==='success'?'bi bi-check-circle-fill':'bi bi-exclamation-circle-fill'"></i>
-      {{ alert.msg }}
-    </div>
-
     <!-- Global search results -->
     <div v-if="searchResults" class="pp-card mb-4">
       <div class="d-flex align-items-center justify-content-between mb-3">
@@ -338,7 +332,7 @@ const AdminDashboard = {
           <div class="col-md-4">
             <select v-model="appStatus" class="form-select" @change="fetchApplications">
               <option value="">All statuses</option>
-              <option v-for="s in ['applied','shortlisted','selected','rejected','waiting']"
+              <option v-for="s in ['applied','shortlisted','offered','hired','selected','offer_declined','rejected','waiting']"
                 :key="s" :value="s">{{ s }}</option>
             </select>
           </div>
@@ -413,6 +407,112 @@ const AdminDashboard = {
       </div>
     </div>
 
+    <!-- ── TAB: System Health ─────────────────────────────── -->
+    <div v-if="activeTab==='health'">
+      <div class="d-flex align-items-center justify-content-between mb-3">
+        <h6 class="mb-0 fw-600">Infrastructure status</h6>
+        <button class="btn btn-sm btn-outline-primary" @click="fetchSystemHealth">
+          <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+        </button>
+      </div>
+
+      <div v-if="loadingHealth" class="pp-spinner"><div class="spinner-border text-primary"></div></div>
+      <div v-else-if="health" class="row g-3">
+        <div class="col-md-4" v-for="(component, name) in health.components" :key="name">
+          <div class="pp-card">
+            <div class="d-flex align-items-center justify-content-between mb-2">
+              <span class="fw-500" style="text-transform:capitalize">{{ name.replace('_', ' ') }}</span>
+              <span :class="'status-badge '+healthBadgeClass(component.status)">{{ component.status }}</span>
+            </div>
+            <pre class="mb-0 text-muted" style="font-size:.75rem;white-space:pre-wrap">{{ JSON.stringify(component, null, 2) }}</pre>
+          </div>
+        </div>
+
+        <div class="col-12">
+          <div class="pp-card">
+            <div class="d-flex align-items-center justify-content-between">
+              <div>
+                <div class="fw-600">Overall status</div>
+                <div class="text-muted" style="font-size:.85rem">Generated at: {{ formatDate(health.generated_at) }}</div>
+              </div>
+              <span :class="'status-badge '+healthBadgeClass(health.status)">{{ health.status }}</span>
+            </div>
+            <div class="mt-3" v-if="health.job_runs">
+              <div class="fw-500 mb-2" style="font-size:.85rem">Latest scheduled jobs</div>
+              <div class="d-flex flex-wrap gap-2">
+                <span
+                  v-for="(run, jobName) in health.job_runs"
+                  :key="jobName"
+                  :class="'status-badge '+healthBadgeClass(run?.status === 'success' ? 'up' : (run ? 'down' : 'waiting'))"
+                >
+                  {{ jobName.split('.').pop() }}: {{ run ? run.status : 'no-runs' }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── TAB: Audit Logs ───────────────────────────────── -->
+    <div v-if="activeTab==='audit'">
+      <div class="pp-card mb-3">
+        <div class="row g-2 align-items-end">
+          <div class="col-md-4">
+            <label class="form-label">Action contains</label>
+            <input v-model="auditAction" class="form-control" placeholder="e.g. drive.approve" @input="debouncedAuditSearch" />
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Entity type</label>
+            <select v-model="auditEntityType" class="form-select" @change="fetchAuditLogs">
+              <option value="">All</option>
+              <option value="company">company</option>
+              <option value="student">student</option>
+              <option value="drive">drive</option>
+              <option value="application">application</option>
+              <option value="user">user</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Limit</label>
+            <select v-model.number="auditLimit" class="form-select" @change="fetchAuditLogs">
+              <option :value="50">50</option>
+              <option :value="100">100</option>
+              <option :value="200">200</option>
+            </select>
+          </div>
+          <div class="col-md-3 text-md-end">
+            <button class="btn btn-outline-primary" @click="fetchAuditLogs">
+              <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="loadingAudit" class="pp-spinner"><div class="spinner-border text-primary"></div></div>
+      <div v-else-if="auditLogs.length===0" class="empty-state pp-card">
+        <i class="bi bi-journal-text"></i>No audit logs found
+      </div>
+      <div v-else class="pp-card">
+        <table class="pp-table">
+          <thead>
+            <tr>
+              <th>Time</th><th>Actor</th><th>Action</th><th>Entity</th><th>IP</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in auditLogs" :key="row.id">
+              <td style="font-size:.82rem">{{ formatDate(row.created_at) }}</td>
+              <td style="font-size:.85rem">{{ row.actor_email || ('User #' + (row.actor_user_id || 'N/A')) }}</td>
+              <td><span class="mono" style="font-size:.78rem">{{ row.action }}</span></td>
+              <td style="font-size:.82rem">{{ row.entity_type }} #{{ row.entity_id || '—' }}</td>
+              <td style="font-size:.82rem">{{ row.ip_address || '—' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- ── Reject modal ────────────────────────────────────── -->
     <div v-if="rejectModal.show"
       style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1050;
@@ -421,14 +521,25 @@ const AdminDashboard = {
         <h6 class="fw-600 mb-3">
           Reject {{ rejectModal.type === 'company' ? rejectModal.item.name : rejectModal.item.title }}
         </h6>
+        <p class="form-legend">Fields marked with * are required.</p>
         <div class="mb-3">
-          <label class="form-label">Reason <span class="text-danger">*</span></label>
-          <textarea v-model="rejectModal.reason" class="form-control" rows="3"
+          <label class="form-label label-required">Reason</label>
+          <textarea
+            v-model="rejectModal.reason"
+            :class="['form-control', { 'is-invalid': rejectValidation.submitted && rejectModal.reason.trim().length < 5 }]"
+            rows="3"
+            maxlength="300"
             placeholder="Provide a reason for rejection..."></textarea>
+          <div class="d-flex justify-content-between align-items-center mt-1">
+            <div class="field-hint">Minimum 5 characters.</div>
+            <small :class="['field-hint', rejectModal.reason.length > 280 ? 'text-danger' : '']">
+              {{ rejectModal.reason.length }}/300
+            </small>
+          </div>
         </div>
         <div class="d-flex gap-2 justify-content-end">
-          <button class="btn btn-outline-secondary" @click="rejectModal.show=false">Cancel</button>
-          <button class="btn btn-danger" @click="confirmReject" :disabled="!rejectModal.reason.trim()">
+          <button class="btn btn-outline-secondary" @click="cancelReject">Cancel</button>
+          <button class="btn btn-danger" @click="confirmReject" :disabled="rejectModal.reason.trim().length < 5">
             Reject
           </button>
         </div>
@@ -448,13 +559,24 @@ const AdminDashboard = {
           This will deactivate the account immediately.
           {{ blacklistModal.type==='company' ? 'All active drives will be closed.' : '' }}
         </div>
+        <p class="form-legend">Fields marked with * are required.</p>
         <div class="mb-3">
-          <label class="form-label">Reason <span class="text-danger">*</span></label>
-          <textarea v-model="blacklistModal.reason" class="form-control" rows="3"
+          <label class="form-label label-required">Reason</label>
+          <textarea
+            v-model="blacklistModal.reason"
+            :class="['form-control', { 'is-invalid': blacklistValidation.submitted && !blacklistModal.reason.trim() }]"
+            rows="3"
+            maxlength="300"
             placeholder="Provide a reason..."></textarea>
+          <div class="d-flex justify-content-between align-items-center mt-1">
+            <div class="field-hint">This reason will be recorded in audit logs.</div>
+            <small :class="['field-hint', blacklistModal.reason.length > 280 ? 'text-danger' : '']">
+              {{ blacklistModal.reason.length }}/300
+            </small>
+          </div>
         </div>
         <div class="d-flex gap-2 justify-content-end">
-          <button class="btn btn-outline-secondary" @click="blacklistModal.show=false">Cancel</button>
+          <button class="btn btn-outline-secondary" @click="cancelBlacklist">Cancel</button>
           <button class="btn btn-danger" @click="confirmBlacklist"
             :disabled="!blacklistModal.reason.trim()">Blacklist</button>
         </div>
@@ -474,6 +596,8 @@ const AdminDashboard = {
         { key: "drives",        label: "Drives",        icon: "bi bi-briefcase" },
         { key: "applications",  label: "Applications",  icon: "bi bi-file-earmark-text" },
         { key: "reports",       label: "Reports",       icon: "bi bi-bar-chart" },
+        { key: "health",        label: "System Health", icon: "bi bi-heart-pulse" },
+        { key: "audit",         label: "Audit Logs",    icon: "bi bi-journal-text" },
       ],
       stats:            {},
       pendingCompanies: [],
@@ -483,24 +607,35 @@ const AdminDashboard = {
       drives:           [],
       applications:     [],
       report:           null,
+      health:           null,
+      auditLogs:        [],
       loadingDash:      true,
       loadingCompanies: false,
       loadingStudents:  false,
       loadingDrives:    false,
       loadingApps:      false,
       loadingReport:    false,
+      loadingHealth:    false,
+      loadingAudit:     false,
       companySearch:    "",
       companyStatus:    "pending",
       studentSearch:    "",
       driveSearch:      "",
       driveStatus:      "pending",
       appStatus:        "",
+      auditAction:      "",
+      auditEntityType:  "",
+      auditLimit:       100,
       globalSearch:     "",
       searchResults:    null,
       alert:    { msg: "", type: "success" },
       rejectModal:    { show: false, type: "", item: {}, reason: "" },
       blacklistModal: { show: false, type: "", item: {}, reason: "" },
+      rejectValidation: { submitted: false },
+      blacklistValidation: { submitted: false },
       _timers: {},
+      _refreshTimer: null,
+      _onWindowFocus: null,
     };
   },
 
@@ -512,7 +647,7 @@ const AdminDashboard = {
         { label: "Companies",    value: s.total_companies   || 0, icon: "bi bi-building-fill",     bg: "#f0fdf4", color: "#166534" },
         { label: "Drives",       value: s.total_drives      || 0, icon: "bi bi-briefcase-fill",    bg: "#fef3c7", color: "#92400e" },
         { label: "Applications", value: s.total_applications|| 0, icon: "bi bi-file-earmark-fill", bg: "#fdf2f8", color: "#86198f" },
-        { label: "Pending co.",  value: s.pending_companies || 0, icon: "bi bi-hourglass-split",   bg: "#fff7ed", color: "#c2410c" },
+        { label: "Pending companies",  value: s.pending_companies || 0, icon: "bi bi-hourglass-split",   bg: "#fff7ed", color: "#c2410c" },
         { label: "Pending drives",value:s.pending_drives    || 0, icon: "bi bi-clock-fill",        bg: "#fff7ed", color: "#c2410c" },
         { label: "Selected",     value: s.selected_students || 0, icon: "bi bi-trophy-fill",       bg: "#dcfce7", color: "#166534" },
         { label: "Avg CGPA",     value: "—",                      icon: "bi bi-graph-up",          bg: "#f3f4f6", color: "#374151" },
@@ -527,15 +662,37 @@ const AdminDashboard = {
       if (tab === "drives")       this.fetchDrives();
       if (tab === "applications") this.fetchApplications();
       if (tab === "reports")      this.fetchReport();
+      if (tab === "health")       this.fetchSystemHealth();
+      if (tab === "audit")        this.fetchAuditLogs();
     }
   },
 
   async mounted() {
     await this.fetchDashboard();
+    this._onWindowFocus = () => this.refreshCurrentView(true);
+    window.addEventListener("focus", this._onWindowFocus);
+    this._refreshTimer = setInterval(() => this.refreshCurrentView(true), 30000);
+  },
+
+  beforeUnmount() {
+    Object.values(this._timers).forEach((timer) => clearTimeout(timer));
+    if (this._refreshTimer) clearInterval(this._refreshTimer);
+    if (this._onWindowFocus) window.removeEventListener("focus", this._onWindowFocus);
   },
 
   methods: {
-    async fetchDashboard() {
+    async refreshCurrentView(silent = false) {
+      await this.fetchDashboard(silent);
+      if (this.activeTab === "companies") await this.fetchCompanies(silent);
+      if (this.activeTab === "students") await this.fetchStudents(silent);
+      if (this.activeTab === "drives") await this.fetchDrives(silent);
+      if (this.activeTab === "applications") await this.fetchApplications(silent);
+      if (this.activeTab === "reports") await this.fetchReport(silent);
+      if (this.activeTab === "health") await this.fetchSystemHealth(silent);
+      if (this.activeTab === "audit") await this.fetchAuditLogs(silent);
+    },
+
+    async fetchDashboard(silent = false) {
       this.loadingDash = true;
       try {
         const { data } = await ApiService.adminDashboard();
@@ -548,11 +705,13 @@ const AdminDashboard = {
         this.pendingDrives    = dr.data.drives;
         this.tabs[1].badge = this.pendingCompanies.length || null;
         this.tabs[3].badge = this.pendingDrives.length    || null;
-      } catch { this.showAlert("Failed to load dashboard", "danger"); }
+      } catch {
+        if (!silent) this.showAlert("Failed to load dashboard", "danger");
+      }
       finally  { this.loadingDash = false; }
     },
 
-    async fetchCompanies() {
+    async fetchCompanies(silent = false) {
       this.loadingCompanies = true;
       try {
         const params = {};
@@ -560,21 +719,25 @@ const AdminDashboard = {
         if (this.companySearch) params.search = this.companySearch;
         const { data } = await ApiService.adminCompanies(params);
         this.companies = data.companies;
-      } catch { this.showAlert("Failed to load companies", "danger"); }
+      } catch {
+        if (!silent) this.showAlert("Failed to load companies", "danger");
+      }
       finally  { this.loadingCompanies = false; }
     },
 
-    async fetchStudents() {
+    async fetchStudents(silent = false) {
       this.loadingStudents = true;
       try {
         const params = this.studentSearch ? { search: this.studentSearch } : {};
         const { data } = await ApiService.adminStudents(params);
         this.students = data.students;
-      } catch { this.showAlert("Failed to load students", "danger"); }
+      } catch {
+        if (!silent) this.showAlert("Failed to load students", "danger");
+      }
       finally  { this.loadingStudents = false; }
     },
 
-    async fetchDrives() {
+    async fetchDrives(silent = false) {
       this.loadingDrives = true;
       try {
         const params = {};
@@ -582,27 +745,63 @@ const AdminDashboard = {
         if (this.driveSearch) params.search = this.driveSearch;
         const { data } = await ApiService.adminDrives(params);
         this.drives = data.drives;
-      } catch { this.showAlert("Failed to load drives", "danger"); }
+      } catch {
+        if (!silent) this.showAlert("Failed to load drives", "danger");
+      }
       finally  { this.loadingDrives = false; }
     },
 
-    async fetchApplications() {
+    async fetchApplications(silent = false) {
       this.loadingApps = true;
       try {
         const params = this.appStatus ? { status: this.appStatus } : {};
         const { data } = await ApiService.adminApplications(params);
         this.applications = data.applications;
-      } catch { this.showAlert("Failed to load applications", "danger"); }
+      } catch {
+        if (!silent) this.showAlert("Failed to load applications", "danger");
+      }
       finally  { this.loadingApps = false; }
     },
 
-    async fetchReport() {
+    async fetchReport(silent = false) {
       this.loadingReport = true;
       try {
         const { data } = await ApiService.adminReport();
         this.report = data.report;
-      } catch { this.showAlert("Failed to load report", "danger"); }
+      } catch {
+        if (!silent) this.showAlert("Failed to load report", "danger");
+      }
       finally  { this.loadingReport = false; }
+    },
+
+    async fetchSystemHealth(silent = false) {
+      this.loadingHealth = true;
+      try {
+        const { data } = await ApiService.adminSystemHealth();
+        this.health = data.health;
+      } catch {
+        if (!silent) this.showAlert("Failed to load system health", "danger");
+      } finally {
+        this.loadingHealth = false;
+      }
+    },
+
+    async fetchAuditLogs(silent = false) {
+      this.loadingAudit = true;
+      try {
+        const params = {
+          limit: this.auditLimit,
+        };
+        if (this.auditAction.trim()) params.action = this.auditAction.trim();
+        if (this.auditEntityType) params.entity_type = this.auditEntityType;
+
+        const { data } = await ApiService.adminAuditLogs(params);
+        this.auditLogs = data.logs || [];
+      } catch {
+        if (!silent) this.showAlert("Failed to load audit logs", "danger");
+      } finally {
+        this.loadingAudit = false;
+      }
     },
 
     // ── Company actions ──
@@ -613,14 +812,16 @@ const AdminDashboard = {
         this.pendingCompanies = this.pendingCompanies.filter(x => x.id !== c.id);
         this.stats.pending_companies = Math.max(0, (this.stats.pending_companies||0) - 1);
         this.tabs[1].badge = this.pendingCompanies.length || null;
+        await this.refreshCurrentView(true);
         this.showAlert(`${c.name} approved`, "success");
       } catch (e) { this.showAlert(e.response?.data?.message || "Failed", "danger"); }
     },
 
     async unblacklistCompany(c) {
       try {
-        await ApiService.adminBlacklistCo(c.id, { reason: "reinstated" });
+        await ApiService.adminUnblacklistCo(c.id);
         c.is_blacklisted = false;
+        await this.refreshCurrentView(true);
         this.showAlert(`${c.name} reinstated`, "success");
       } catch (e) { this.showAlert(e.response?.data?.message || "Failed", "danger"); }
     },
@@ -630,6 +831,7 @@ const AdminDashboard = {
       try {
         await ApiService.adminUnblacklistStu(s.id);
         s.is_blacklisted = false;
+        await this.refreshCurrentView(true);
         this.showAlert(`${s.full_name} reinstated`, "success");
       } catch (e) { this.showAlert(e.response?.data?.message || "Failed", "danger"); }
     },
@@ -642,6 +844,7 @@ const AdminDashboard = {
         this.pendingDrives = this.pendingDrives.filter(x => x.id !== d.id);
         this.stats.pending_drives = Math.max(0, (this.stats.pending_drives||0) - 1);
         this.tabs[3].badge = this.pendingDrives.length || null;
+        await this.refreshCurrentView(true);
         this.showAlert(`"${d.title}" approved`, "success");
       } catch (e) { this.showAlert(e.response?.data?.message || "Failed", "danger"); }
     },
@@ -651,39 +854,67 @@ const AdminDashboard = {
       try {
         await ApiService.adminCloseDrive(d.id);
         d.status = "closed";
+        await this.refreshCurrentView(true);
         this.showAlert(`"${d.title}" closed`, "success");
       } catch (e) { this.showAlert(e.response?.data?.message || "Failed", "danger"); }
     },
 
     // ── Modals ──
     openRejectModal(type, item) {
+      this.rejectValidation.submitted = false;
       this.rejectModal = { show: true, type, item, reason: "" };
     },
 
+    cancelReject() {
+      this.rejectValidation.submitted = false;
+      this.rejectModal.show = false;
+    },
+
     async confirmReject() {
+      this.rejectValidation.submitted = true;
+      if (this.rejectModal.reason.trim().length < 5) {
+        this.showAlert("Rejection reason must be at least 5 characters", "danger");
+        return;
+      }
       const { type, item, reason } = this.rejectModal;
       try {
         if (type === "company") {
           await ApiService.adminRejectCompany(item.id, { reason });
           item.approval_status = "rejected";
           this.pendingCompanies = this.pendingCompanies.filter(x => x.id !== item.id);
+          this.stats.pending_companies = Math.max(0, (this.stats.pending_companies || 0) - 1);
           this.tabs[1].badge = this.pendingCompanies.length || null;
         } else {
           await ApiService.adminRejectDrive(item.id, { reason });
           item.status = "rejected";
           this.pendingDrives = this.pendingDrives.filter(x => x.id !== item.id);
+          this.stats.pending_drives = Math.max(0, (this.stats.pending_drives || 0) - 1);
+          this.stats.total_drives = Math.max(0, (this.stats.total_drives || 0) - 1);
           this.tabs[3].badge = this.pendingDrives.length || null;
         }
         this.rejectModal.show = false;
+        this.rejectValidation.submitted = false;
+        await this.refreshCurrentView(true);
         this.showAlert("Rejected successfully", "success");
       } catch (e) { this.showAlert(e.response?.data?.message || "Failed", "danger"); }
     },
 
     openBlacklistModal(type, item) {
+      this.blacklistValidation.submitted = false;
       this.blacklistModal = { show: true, type, item, reason: "" };
     },
 
+    cancelBlacklist() {
+      this.blacklistValidation.submitted = false;
+      this.blacklistModal.show = false;
+    },
+
     async confirmBlacklist() {
+      this.blacklistValidation.submitted = true;
+      if (!this.blacklistModal.reason.trim()) {
+        this.showAlert("Blacklist reason is required", "danger");
+        return;
+      }
       const { type, item, reason } = this.blacklistModal;
       try {
         if (type === "company") {
@@ -694,6 +925,8 @@ const AdminDashboard = {
           item.is_blacklisted = true;
         }
         this.blacklistModal.show = false;
+        this.blacklistValidation.submitted = false;
+        await this.refreshCurrentView(true);
         this.showAlert("Blacklisted successfully", "success");
       } catch (e) { this.showAlert(e.response?.data?.message || "Failed", "danger"); }
     },
@@ -725,14 +958,27 @@ const AdminDashboard = {
       this._timers.drive = setTimeout(() => this.fetchDrives(), 400);
     },
 
+    debouncedAuditSearch() {
+      clearTimeout(this._timers.audit);
+      this._timers.audit = setTimeout(() => this.fetchAuditLogs(), 400);
+    },
+
     formatDate(dt) {
       if (!dt) return "—";
-      return new Date(dt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+      return new Date(dt).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    },
+
+    healthBadgeClass(status) {
+      if (status === "up") return "approved";
+      if (status === "degraded") return "pending";
+      if (status === "down") return "rejected";
+      return "waiting";
     },
 
     showAlert(msg, type = "success") {
-      this.alert = { msg, type };
-      setTimeout(() => this.alert.msg = "", 4000);
+      if (typeof window.ppToast === "function") {
+        window.ppToast(msg, type);
+      }
     },
   }
 };

@@ -28,6 +28,11 @@ def init_celery(app):
                 "task":     "jobs.send_monthly_report",
                 "schedule": crontab(day_of_month=1, hour=7, minute=0),
             },
+            # Cleanup expired reset tokens — every day at 2:30 AM IST
+            "cleanup-expired-reset-tokens": {
+                "task":     "jobs.cleanup_expired_reset_tokens",
+                "schedule": crontab(hour=2, minute=30),
+            },
         },
     )
 

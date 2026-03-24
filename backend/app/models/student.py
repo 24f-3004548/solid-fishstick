@@ -38,6 +38,8 @@ class Student(db.Model):
             "id":             self.id,
             "user_id":        self.user_id,
             "full_name":      self.full_name,
+            "phone":          self.phone,
+            "dob":            self.dob.isoformat() if self.dob else None,
             "email":          self.user.email if self.user else None,
             "roll_number":    self.roll_number,
             "branch":         self.branch,

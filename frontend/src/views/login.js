@@ -14,14 +14,16 @@ const LoginView = {
         </div>
 
         <form @submit.prevent="submit">
+          <p class="form-legend">Fields marked with * are required.</p>
           <div class="mb-3">
-            <label class="form-label">Email address</label>
+            <label class="form-label label-required">Email address</label>
             <input v-model="form.email" type="email" class="form-control"
               placeholder="you@example.com" required autofocus />
+            <div class="field-hint">Use the same email you registered with.</div>
           </div>
 
           <div class="mb-4">
-            <label class="form-label">Password</label>
+            <label class="form-label label-required">Password</label>
             <div class="input-group">
               <input v-model="form.password" :type="showPw ? 'text' : 'password'"
                 class="form-control" placeholder="••••••••" required />
@@ -29,6 +31,9 @@ const LoginView = {
                 @click="showPw = !showPw">
                 <i :class="showPw ? 'bi bi-eye-slash' : 'bi bi-eye'"></i>
               </button>
+            </div>
+            <div class="text-end mt-2">
+              <router-link to="/forgot-password" style="font-size:.84rem">Forgot password?</router-link>
             </div>
           </div>
 

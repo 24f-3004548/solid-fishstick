@@ -15,12 +15,6 @@ const CompanyDashboard = {
       </button>
     </div>
 
-    <!-- Alert -->
-    <div v-if="alert.msg" :class="['pp-alert alert-'+alert.type+' mb-4']">
-      <i :class="alert.type==='success'?'bi bi-check-circle-fill':'bi bi-exclamation-circle-fill'"></i>
-      {{ alert.msg }}
-    </div>
-
     <!-- Tabs -->
     <ul class="nav nav-pills mb-4" style="gap:.5rem">
       <li v-for="t in tabs" :key="t.key">
@@ -216,6 +210,13 @@ const CompanyDashboard = {
                 :value="a.status" @change="e => updateAppStatus(a, e.target.value)">
                 <option v-for="s in appStatuses" :key="s" :value="s">{{ s }}</option>
               </select>
+              <button
+                v-if="['shortlisted','waiting','selected'].includes(a.status)"
+                class="btn btn-sm btn-outline-success"
+                @click="sendOfferLetter(a)"
+              >
+                <i class="bi bi-envelope-paper me-1"></i>Offer
+              </button>
               <button class="btn btn-sm btn-outline-secondary"
                 @click="openScheduleModal(a)">
                 <i class="bi bi-calendar-event"></i>
@@ -314,14 +315,25 @@ const CompanyDashboard = {
              display:flex;align-items:center;justify-content:center;padding:1rem;overflow-y:auto">
       <div class="pp-card" style="width:100%;max-width:580px;margin:auto">
         <h6 class="fw-600 mb-4">{{ driveModal.editing ? 'Edit drive' : 'Create new drive' }}</h6>
+        <p class="form-legend">Fields marked with * are required.</p>
         <div class="row g-3">
           <div class="col-12">
-            <label class="form-label">Drive title <span class="text-danger">*</span></label>
-            <input v-model="driveForm.title" class="form-control" placeholder="e.g. Software Engineer Intern"/>
+            <label class="form-label label-required">Drive title</label>
+            <input
+              v-model="driveForm.title"
+              :class="['form-control', { 'is-invalid': driveValidation.submitted && !driveForm.title }]"
+              placeholder="e.g. Software Engineer Intern"
+              required
+            />
           </div>
           <div class="col-12">
-            <label class="form-label">Job description <span class="text-danger">*</span></label>
-            <textarea v-model="driveForm.description" class="form-control" rows="3"></textarea>
+            <label class="form-label label-required">Job description</label>
+            <textarea
+              v-model="driveForm.description"
+              :class="['form-control', { 'is-invalid': driveValidation.submitted && !driveForm.description }]"
+              rows="3"
+              required
+            ></textarea>
           </div>
           <div class="col-md-6">
             <label class="form-label">Job type</label>
@@ -338,6 +350,7 @@ const CompanyDashboard = {
           <div class="col-md-6">
             <label class="form-label">Salary (LPA)</label>
             <input v-model.number="driveForm.salary_lpa" type="number" step="0.5" class="form-control"/>
+            <div class="field-hint">Optional. Keep blank if not disclosed.</div>
           </div>
           <div class="col-md-6">
             <label class="form-label">Min CGPA</label>
@@ -355,8 +368,14 @@ const CompanyDashboard = {
               placeholder="3,4 (comma separated)"/>
           </div>
           <div class="col-md-6">
-            <label class="form-label">Application deadline <span class="text-danger">*</span></label>
-            <input v-model="driveForm.application_deadline" type="datetime-local" class="form-control"/>
+            <label class="form-label label-required">Application deadline</label>
+            <input
+              v-model="driveForm.application_deadline"
+              :class="['form-control', { 'is-invalid': driveValidation.submitted && !driveForm.application_deadline }]"
+              type="datetime-local"
+              required
+            />
+            <div class="field-hint">Must be a future date/time.</div>
           </div>
           <div class="col-md-6">
             <label class="form-label">Drive date</label>
@@ -428,9 +447,12 @@ const CompanyDashboard = {
       loadingHistory:false,
       savingProfile: false,
       savingDrive:   false,
+      _refreshTimer: null,
+      _onWindowFocus: null,
+      driveValidation: { submitted: false },
       driveStatusFilter: "",
       appStatusFilter:   "",
-      appStatuses: ["applied","shortlisted","waiting","selected","rejected"],
+      appStatuses: ["applied","shortlisted","waiting","offered","hired","selected","offer_declined","rejected"],
       profileForm: { description:"", website:"", industry:"", location:"", hr_name:"", hr_email:"", hr_phone:"" },
       driveForm:   { title:"", description:"", job_type:"", location:"", salary_lpa:"", min_cgpa:0,
                      eligible_branches:"", eligible_years:"", application_deadline:"", drive_date:"" },
@@ -450,10 +472,25 @@ const CompanyDashboard = {
 
   async mounted() {
     await this.fetchDashboard();
+    this._onWindowFocus = () => this.refreshCurrentView(true);
+    window.addEventListener("focus", this._onWindowFocus);
+    this._refreshTimer = setInterval(() => this.refreshCurrentView(true), 30000);
+  },
+
+  beforeUnmount() {
+    if (this._refreshTimer) clearInterval(this._refreshTimer);
+    if (this._onWindowFocus) window.removeEventListener("focus", this._onWindowFocus);
   },
 
   methods: {
-    async fetchDashboard() {
+    async refreshCurrentView(silent = false) {
+      await this.fetchDashboard(silent);
+      if (this.activeTab === "drives") await this.fetchDrives(silent);
+      if (this.activeTab === "applications") await this.fetchApplications(silent);
+      if (this.activeTab === "history") await this.fetchHistory(silent);
+    },
+
+    async fetchDashboard(silent = false) {
       this.loadingDash = true;
       try {
         const { data } = await ApiService.companyDashboard();
@@ -469,21 +506,25 @@ const CompanyDashboard = {
           hr_email:    this.company.hr_email    || "",
           hr_phone:    this.company.hr_phone    || "",
         };
-      } catch { this.showAlert("Failed to load dashboard", "danger"); }
+      } catch {
+        if (!silent) this.showAlert("Failed to load dashboard", "danger");
+      }
       finally  { this.loadingDash = false; }
     },
 
-    async fetchDrives() {
+    async fetchDrives(silent = false) {
       this.loadingDrives = true;
       try {
         const params = this.driveStatusFilter ? { status: this.driveStatusFilter } : {};
         const { data } = await ApiService.companyDrives(params);
         this.drives = data.drives;
-      } catch { this.showAlert("Failed to load drives", "danger"); }
+      } catch {
+        if (!silent) this.showAlert("Failed to load drives", "danger");
+      }
       finally  { this.loadingDrives = false; }
     },
 
-    async fetchApplications() {
+    async fetchApplications(silent = false) {
       if (!this.selectedDrive) return;
       this.loadingApps = true;
       this.selectedApps = [];
@@ -491,16 +532,20 @@ const CompanyDashboard = {
         const params = this.appStatusFilter ? { status: this.appStatusFilter } : {};
         const { data } = await ApiService.companyApplications(this.selectedDrive.id, params);
         this.applications = data.applications;
-      } catch { this.showAlert("Failed to load applications", "danger"); }
+      } catch {
+        if (!silent) this.showAlert("Failed to load applications", "danger");
+      }
       finally  { this.loadingApps = false; }
     },
 
-    async fetchHistory() {
+    async fetchHistory(silent = false) {
       this.loadingHistory = true;
       try {
         const { data } = await ApiService.companyHistory();
         this.history = data.history;
-      } catch { this.showAlert("Failed to load history", "danger"); }
+      } catch {
+        if (!silent) this.showAlert("Failed to load history", "danger");
+      }
       finally  { this.loadingHistory = false; }
     },
 
@@ -516,6 +561,7 @@ const CompanyDashboard = {
       this.driveForm = { title:"", description:"", job_type:"", location:"",
         salary_lpa:"", min_cgpa:0, eligible_branches:"", eligible_years:"",
         application_deadline:"", drive_date:"" };
+      this.driveValidation.submitted = false;
       this.driveModal = { show: true, editing: false, driveId: null };
     },
 
@@ -537,10 +583,12 @@ const CompanyDashboard = {
         application_deadline: fmt(drive.application_deadline),
         drive_date:           fmt(drive.drive_date),
       };
+      this.driveValidation.submitted = false;
       this.driveModal = { show: true, editing: true, driveId: drive.id };
     },
 
     async saveDrive() {
+      this.driveValidation.submitted = true;
       if (!this.driveForm.title || !this.driveForm.description || !this.driveForm.application_deadline) {
         return this.showAlert("Title, description and deadline are required", "danger");
       }
@@ -559,8 +607,7 @@ const CompanyDashboard = {
           this.showAlert("Drive created and sent for admin approval", "success");
         }
         this.driveModal.show = false;
-        this.fetchDrives();
-        this.fetchDashboard();
+        await this.refreshCurrentView(true);
       } catch (e) {
         this.showAlert(e.response?.data?.message || "Failed to save drive", "danger");
       } finally { this.savingDrive = false; }
@@ -580,8 +627,27 @@ const CompanyDashboard = {
       try {
         await ApiService.companyUpdateApp(app.id, { status });
         app.status = status;
+        await this.refreshCurrentView(true);
         this.showAlert(`Status updated to "${status}"`, "success");
       } catch (e) { this.showAlert(e.response?.data?.message || "Failed", "danger"); }
+    },
+
+    async sendOfferLetter(app) {
+      const offerLetterUrl = prompt("Enter offer letter URL (PDF/Drive link):");
+      if (!offerLetterUrl) return;
+      const note = prompt("Optional message for candidate:") || "";
+      try {
+        await ApiService.companySendOffer(app.id, {
+          offer_letter_url: offerLetterUrl,
+          message: note,
+        });
+        app.status = "offered";
+        app.remarks = offerLetterUrl;
+        await this.refreshCurrentView(true);
+        this.showAlert("Offer letter sent and status updated to offered", "success");
+      } catch (e) {
+        this.showAlert(e.response?.data?.message || "Failed to send offer letter", "danger");
+      }
     },
 
     async bulkUpdate() {
@@ -596,6 +662,7 @@ const CompanyDashboard = {
         });
         this.selectedApps = [];
         this.bulkStatus   = "";
+        await this.refreshCurrentView(true);
         this.showAlert("Bulk update applied", "success");
       } catch (e) { this.showAlert(e.response?.data?.message || "Failed", "danger"); }
     },
@@ -618,6 +685,7 @@ const CompanyDashboard = {
         await ApiService.companyUpdateApp(app.id, payload);
         Object.assign(app, payload);
         this.scheduleModal.show = false;
+        await this.refreshCurrentView(true);
         this.showAlert("Interview scheduled and student shortlisted", "success");
       } catch (e) { this.showAlert(e.response?.data?.message || "Failed", "danger"); }
     },
@@ -638,8 +706,9 @@ const CompanyDashboard = {
     },
 
     showAlert(msg, type = "success") {
-      this.alert = { msg, type };
-      setTimeout(() => this.alert.msg = "", 4000);
+      if (typeof window.ppToast === "function") {
+        window.ppToast(msg, type);
+      }
     },
   }
 };

@@ -38,6 +38,15 @@ class Config:
     MAIL_PASSWORD = os.getenv("MAIL_PASSWORD", "")
     MAIL_DEFAULT_SENDER = os.getenv("MAIL_DEFAULT_SENDER", os.getenv("MAIL_USERNAME"))
     FRONTEND_URL = os.getenv("FRONTEND_URL", "http://127.0.0.1:8080")
+    FRONTEND_URLS = [
+        url.strip()
+        for url in os.getenv(
+            "FRONTEND_URLS",
+            f"{FRONTEND_URL},http://localhost:8080,http://127.0.0.1:8080",
+        ).split(",")
+        if url.strip()
+    ]
+    PASSWORD_RESET_TOKEN_EXPIRES_MINUTES = int(os.getenv("PASSWORD_RESET_TOKEN_EXPIRES_MINUTES", 30))
 
     # --- Admin seed ---
     ADMIN_EMAIL    = os.getenv("ADMIN_EMAIL")
