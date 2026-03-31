@@ -5,6 +5,7 @@ from flask_mail import Message
 from app.extensions import celery, db
 from app.models import Student, PlacementDrive, Application, User, PasswordResetToken
 from app.utils.job_runs import record_job_run
+from app.utils.datetime_utils import now_ist, to_ist_label
 
 
 # ==================================================================
@@ -18,13 +19,13 @@ def send_daily_reminders():
     from app.extensions import mail
     from flask import current_app
 
-    now      = datetime.utcnow()
-    in_3days = now + timedelta(days=3)
+    now_utc = datetime.utcnow()
+    in_3days = now_utc + timedelta(days=3)
 
     # Drives closing in the next 3 days
     upcoming = PlacementDrive.query.filter(
         PlacementDrive.status == "approved",
-        PlacementDrive.application_deadline >= now,
+        PlacementDrive.application_deadline >= now_utc,
         PlacementDrive.application_deadline <= in_3days,
     ).all()
 
@@ -77,8 +78,9 @@ def send_monthly_report():
     from app.extensions import mail
     from flask import current_app
 
-    now       = datetime.utcnow()
-    month_ago = now - timedelta(days=30)
+    now_utc = datetime.utcnow()
+    now_display = now_ist()
+    month_ago = now_utc - timedelta(days=30)
 
     # Stats for the past month
     total_drives = PlacementDrive.query.filter(
@@ -91,7 +93,7 @@ def send_monthly_report():
 
     total_selected = Application.query.filter(
         Application.applied_at >= month_ago,
-        Application.status == "selected"
+      Application.status.in_(["joined", "selected", "hired"])
     ).count()
 
     new_students = Student.query.filter(
@@ -105,24 +107,40 @@ def send_monthly_report():
 
     apps_by_status = {
         s: Application.query.filter_by(status=s).count()
-        for s in ("applied", "shortlisted", "selected", "rejected")
+      for s in (
+        "applied",
+        "accepted",
+        "interview",
+        "interview_accepted",
+        "offered",
+        "joined",
+        "offer_withdrawn",
+        "void_joined_elsewhere",
+        "rejected",
+        "shortlisted",
+        "waiting",
+        "selected",
+        "hired",
+        "offer_declined",
+      )
     }
 
     html = _render_monthly_report(
-        month=now.strftime("%B %Y"),
+        month=now_display.strftime("%B %Y"),
         total_drives=total_drives,
         total_applications=total_applications,
         total_selected=total_selected,
         new_students=new_students,
         drives_by_status=drives_by_status,
         apps_by_status=apps_by_status,
+        current_date=now_display,
     )
 
     try:
         from flask import current_app
         admin_email = current_app.config.get("ADMIN_EMAIL", "hrimansaha.10@gmail.com")
         msg = Message(
-            subject=f"Placement Portal — Monthly Report ({now.strftime('%B %Y')})",
+            subject=f"Placement Portal — Monthly Report ({now_display.strftime('%B %Y')})",
             recipients=[admin_email],
             html=html,
         )
@@ -190,7 +208,7 @@ def export_applications_csv(student_id):
             html=_render_export_email(student, len(apps)),
         )
         msg.attach(
-            filename=f"applications_{student.roll_number}.csv",
+          filename=f"applications_student_{student.id}.csv",
             content_type="text/csv",
             data=csv_content,
         )
@@ -241,12 +259,12 @@ def cleanup_expired_reset_tokens():
 def _render_reminder_email(student, drives):
     from flask import current_app
 
-    frontend_url = current_app.config.get("FRONTEND_URL", "http://127.0.0.1:8080").rstrip("/")
+    frontend_url = current_app.config.get("FRONTEND_URL", "http://127.0.0.1:5500").rstrip("/")
     dashboard_url = f"{frontend_url}/#/student/dashboard"
 
     rows = ""
     for d in drives:
-        deadline = d.application_deadline.strftime("%d %b %Y, %I:%M %p")
+        deadline = to_ist_label(d.application_deadline)
         rows += f"""
         <tr>
           <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb">{d.title}</td>
@@ -291,7 +309,10 @@ def _render_reminder_email(student, drives):
 
 def _render_monthly_report(month, total_drives, total_applications,
                             total_selected, new_students,
-                            drives_by_status, apps_by_status):
+                            drives_by_status, apps_by_status, current_date=None):
+    if current_date is None:
+        current_date = now_ist()
+
     status_rows = ""
     for s, v in drives_by_status.items():
         status_rows += f"""
@@ -312,23 +333,22 @@ def _render_monthly_report(month, total_drives, total_applications,
     <div style="font-family:'Segoe UI',Arial,sans-serif;max-width:640px;margin:0 auto;background:#fff">
       <div style="background:#1a56db;padding:28px 32px">
         <h1 style="color:#fff;margin:0;font-size:20px">Placement Portal</h1>
-        <p style="color:#bfdbfe;margin:6px 0 0;font-size:14px">Monthly activity report — {month}</p>
+        <p style="color:#bfdbfe;margin:6px 0 0;font-size:14px">Activity report — {month}</p>
       </div>
       <div style="padding:28px 32px">
         <p style="font-size:15px;color:#111827">Hi Admin,</p>
         <p style="font-size:14px;color:#374151">Here is the placement activity summary for <strong>{month}</strong>.</p>
 
-        <!-- Key numbers -->
         <div style="display:flex;gap:16px;margin:24px 0;flex-wrap:wrap">
           {"".join(f'''<div style="flex:1;min-width:120px;background:#f9fafb;border-radius:10px;
                          padding:16px;text-align:center;border:1px solid #e5e7eb">
             <div style="font-size:28px;font-weight:700;color:#1a56db">{v}</div>
             <div style="font-size:12px;color:#6b7280;margin-top:4px">{l}</div>
           </div>''' for v,l in [
-              (total_drives,"New drives"),
-              (total_applications,"Applications"),
-              (total_selected,"Students selected"),
-              (new_students,"New students"),
+              (total_drives, "New drives"),
+              (total_applications, "Applications"),
+              (total_selected, "Students selected"),
+              (new_students, "New students"),
           ])}
         </div>
 
@@ -348,7 +368,7 @@ def _render_monthly_report(month, total_drives, total_applications,
         </div>
 
         <p style="font-size:13px;color:#9ca3af;margin-top:28px">
-          This report was auto-generated by the Placement Portal on {datetime.utcnow().strftime("%d %b %Y")}.
+          This report was auto-generated by the Placement Portal on {current_date.strftime("%d %b %Y at %H:%M:%S %Z")}.
         </p>
       </div>
     </div>"""
@@ -367,7 +387,7 @@ def _render_export_email(student, count):
           The CSV file with <strong>{count} application(s)</strong> is attached to this email.
         </p>
         <p style="font-size:13px;color:#9ca3af;margin-top:24px">
-          Exported on {datetime.utcnow().strftime("%d %b %Y at %I:%M %p UTC")}
+          Exported on {now_ist().strftime("%d %b %Y at %I:%M %p IST")}
         </p>
       </div>
     </div>"""

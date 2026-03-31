@@ -14,7 +14,6 @@ class Student(db.Model):
     dob         = db.Column(db.Date)
 
     # Academic details
-    roll_number = db.Column(db.String(50), unique=True, nullable=False)
     branch      = db.Column(db.String(100), nullable=False)   # e.g. "Computer Science"
     year        = db.Column(db.Integer, nullable=False)       # 1 / 2 / 3 / 4
     cgpa        = db.Column(db.Float, nullable=False)
@@ -41,7 +40,6 @@ class Student(db.Model):
             "phone":          self.phone,
             "dob":            self.dob.isoformat() if self.dob else None,
             "email":          self.user.email if self.user else None,
-            "roll_number":    self.roll_number,
             "branch":         self.branch,
             "year":           self.year,
             "cgpa":           self.cgpa,
@@ -50,4 +48,4 @@ class Student(db.Model):
         }
 
     def __repr__(self):
-        return f"<Student {self.full_name} ({self.roll_number})>"
+        return f"<Student {self.full_name}>"

@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Packaging / tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Environment files / secrets
+.env
+.env.*
+!.env.example
+backend/.env
+
+# Flask / DB runtime artifacts
+instance/
+*.db
+*.sqlite
+*.sqlite3
+backend/placement_portal.db
+
+# Celery / scheduler artifacts
+backend/celerybeat-schedule
+backend/celerybeat-schedule-shm
+backend/celerybeat-schedule-wal
+
+# Uploads and generated exports
+uploads/
+backend/uploads/
+
+# Frontend runtime artifacts
+frontend/node_modules/
+
+# Logs
+*.log
+logs/
+
+# IDE / editor
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db

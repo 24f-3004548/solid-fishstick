@@ -1,72 +1,192 @@
 const CompanyDashboard = {
+  props: {
+    section: {
+      type: String,
+      default: "overview",
+    },
+  },
   template: `
-  <div class="container py-4">
+  <div class="portal-page py-4 role-shell">
 
-    <!-- Header -->
-    <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
-      <div>
-        <h2 class="mb-0">{{ company.name || '...' }}</h2>
-        <p class="text-muted mb-0" style="font-size:.9rem">
-          {{ company.industry || 'Company' }} · {{ company.location || '' }}
-        </p>
+    <aside class="role-sidebar pp-card">
+      <div class="role-sidebar-head">
+        <div class="portal-subtitle">Company</div>
+        <h6>Navigation</h6>
       </div>
-      <button class="btn btn-primary btn-sm" @click="openCreateDrive">
-        <i class="bi bi-plus-circle me-1"></i>Create drive
-      </button>
-    </div>
-
-    <!-- Tabs -->
-    <ul class="nav nav-pills mb-4" style="gap:.5rem">
-      <li v-for="t in tabs" :key="t.key">
-        <button :class="['btn btn-sm', activeTab===t.key ? 'btn-primary' : 'btn-outline-secondary']"
-          @click="activeTab=t.key">
-          <i :class="t.icon+' me-1'"></i>{{ t.label }}
+      <nav class="role-sidebar-nav">
+        <button
+          v-for="tab in tabs"
+          :key="'company_sb_' + tab.key"
+          type="button"
+          :class="['role-sidebar-link', { active: activeTab === tab.key }]"
+          @click="goToTab(tab.key)">
+          <i :class="tab.icon"></i>
+          <span>{{ tab.label }}</span>
         </button>
-      </li>
-    </ul>
+      </nav>
+    </aside>
+
+    <div class="role-main">
+
+    <div class="portal-hero flex-wrap">
+      <div>
+        <div class="portal-subtitle">Company Workspace</div>
+        <h2 class="mb-0">Welcome back, {{ company.name || 'Company' }}</h2>
+        <p>Manage your active recruitment campaigns and track applicant progress across campuses.</p>
+      </div>
+      <div class="portal-panel d-flex align-items-center gap-3" style="padding:.8rem 1rem;min-width:190px;">
+        <div class="stat-icon" style="background:var(--surface-2)"><i class="bi bi-megaphone-fill" style="color:var(--brand)"></i></div>
+        <div>
+          <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Active drives</div>
+          <div style="font-size:1.25rem;font-weight:800;line-height:1;">{{ stats.approved_drives || 0 }}</div>
+        </div>
+      </div>
+    </div>
 
     <!-- ── TAB: Overview ───────────────────────────────────── -->
     <div v-if="activeTab==='overview'">
-      <div class="row g-3 mb-4">
-        <div class="col-6 col-md-3" v-for="s in statCards" :key="s.label">
-          <div class="stat-card">
-            <div class="stat-icon" :style="{background:s.bg}">
-              <i :class="s.icon" :style="{color:s.color}"></i>
+      <div class="row g-4 mb-4">
+        <div class="col-lg-6">
+          <div class="pp-card h-100 position-relative overflow-hidden">
+            <div class="d-flex justify-content-between align-items-start mb-4">
+              <div class="company-logo" style="width:56px;height:56px;"><i class="bi bi-building"></i></div>
+              <span :class="'status-badge ' + (company.is_blacklisted ? 'rejected' : (company.approval_status || 'pending'))">
+                {{ company.is_blacklisted ? 'Blacklisted' : formatStatusLabel(company.approval_status || 'pending') }}
+              </span>
             </div>
-            <div>
-              <div class="stat-value">{{ s.value }}</div>
-              <div class="stat-label">{{ s.label }}</div>
+            <h5 class="fw-bold mb-2">{{ company.name || 'Company Profile' }}</h5>
+            <p class="text-muted mb-3" style="max-width:520px;">{{ company.description || 'Company description will appear here for student visibility.' }}</p>
+            <div class="d-flex gap-4 flex-wrap">
+              <div>
+                <div class="text-muted text-uppercase" style="font-size:.66rem;letter-spacing:.08em;font-weight:700;">Industry</div>
+                <div class="fw-semibold">{{ company.industry || 'Information Technology' }}</div>
+              </div>
+              <div>
+                <div class="text-muted text-uppercase" style="font-size:.66rem;letter-spacing:.08em;font-weight:700;">Global Reach</div>
+                <div class="fw-semibold">{{ company.location || 'Multiple campuses' }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-lg-6">
+          <div class="pp-card h-100" style="background:linear-gradient(135deg,#003f87 0%,#0056b3 100%);color:#fff;">
+            <div class="d-flex align-items-center justify-content-between mb-3">
+              <h6 class="mb-0 fw-bold">Applicant Velocity</h6>
+              <i class="bi bi-graph-up-arrow"></i>
+            </div>
+            <div style="font-size:2.2rem;font-weight:800;line-height:1;">{{ stats.total_applicants || 0 }}</div>
+            <div style="opacity:.82;">Total applicants this season</div>
+            <div class="d-flex align-items-end gap-2 mt-4" style="height:76px;">
+              <div v-for="(bar,i) in applicantVelocityBars" :key="'bar_'+i" :style="{height:bar.height+'%',background:bar.highlight?'#ffffff':'rgba(255,255,255,.35)',flex:'1',borderRadius:'4px 4px 0 0'}"></div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Recent drives -->
-      <div class="pp-card mb-4">
-        <div class="d-flex align-items-center justify-content-between mb-3">
-          <h6 class="mb-0 fw-600">Recent drives</h6>
-          <button class="btn btn-sm btn-outline-primary" @click="activeTab='drives'">View all</button>
+      <div class="company-overview-grid mb-4">
+        <div class="pp-card h-100">
+          <h6 class="fw-bold mb-3">Current Placement</h6>
+          <div class="row g-3">
+            <div class="col-6">
+              <div class="portal-panel h-100 company-kpi-panel">
+                <div class="text-muted text-uppercase" style="font-size:.66rem;letter-spacing:.08em;font-weight:700;">Joined</div>
+                <div class="fw-bold company-kpi-value">{{ stats.total_selected || 0 }}</div>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="portal-panel h-100 company-kpi-panel">
+                <div class="text-muted text-uppercase" style="font-size:.66rem;letter-spacing:.08em;font-weight:700;">Offered</div>
+                <div class="fw-bold company-kpi-value">{{ stats.total_offered || 0 }}</div>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="portal-panel h-100 company-kpi-panel">
+                <div class="text-muted text-uppercase" style="font-size:.66rem;letter-spacing:.08em;font-weight:700;">Applicants</div>
+                <div class="fw-bold company-kpi-value">{{ stats.total_applicants || 0 }}</div>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="portal-panel h-100 company-kpi-panel">
+                <div class="text-muted text-uppercase" style="font-size:.66rem;letter-spacing:.08em;font-weight:700;">Active Drives</div>
+                <div class="fw-bold company-kpi-value">{{ stats.approved_drives || 0 }}</div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div v-if="loadingDash" class="pp-spinner"><div class="spinner-border spinner-border-sm"></div></div>
-        <div v-else-if="recentDrives.length===0" class="empty-state">
-          <i class="bi bi-briefcase"></i>No drives yet.
-          <button class="btn btn-sm btn-primary mt-2" @click="openCreateDrive">Create your first drive</button>
+
+        <div class="pp-card h-100">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+              <h6 class="fw-bold mb-0">Applicant Diversity Index</h6>
+              <small class="text-muted">Based on current active recruitment drives</small>
+            </div>
+          </div>
+
+          <div class="company-diversity-layout">
+            <div class="company-diversity-chart-wrap">
+              <svg viewBox="0 0 200 200" class="company-diversity-pie" role="img" aria-label="Applicant diversity pie chart">
+                <circle cx="100" cy="100" r="92" fill="#dfe3e6"></circle>
+                <path
+                  v-for="slice in diversityPieSlices"
+                  :key="'slice_'+slice.label"
+                  :d="slice.path"
+                  :fill="slice.color"
+                  :style="{ opacity: hoveredDiversity && hoveredDiversity.label !== slice.label ? 0.45 : 1 }"
+                  @mouseenter="hoveredDiversity = slice"
+                  @mouseleave="hoveredDiversity = null"
+                ></path>
+              </svg>
+              <div class="company-diversity-hover-tag" v-if="hoveredDiversity">
+                <strong>{{ hoveredDiversity.label }}</strong>
+                <span>{{ hoveredDiversity.percent }}%</span>
+              </div>
+            </div>
+            <div :class="['company-diversity-legend', { 'two-col': diversitySegments.length >= 6 }]">
+              <div v-if="!diversitySegments.length" class="text-muted" style="font-size:.88rem;">No applicant diversity data available yet.</div>
+              <div
+                v-for="segment in diversitySegments"
+                :key="segment.label"
+                class="company-diversity-item"
+                :class="{ active: hoveredDiversity && hoveredDiversity.label === segment.label }"
+                @mouseenter="hoveredDiversity = segment"
+                @mouseleave="hoveredDiversity = null"
+              >
+                <span class="badge me-2" :style="{ background: segment.color }">&nbsp;</span>
+                {{ segment.label }} ({{ segment.percent }}%)
+              </div>
+            </div>
+          </div>
         </div>
-        <table v-else class="pp-table">
-          <thead><tr><th>Drive</th><th>Deadline</th><th>Applicants</th><th>Status</th><th></th></tr></thead>
-          <tbody>
-            <tr v-for="d in recentDrives" :key="d.id">
-              <td class="fw-500">{{ d.title }}</td>
-              <td style="font-size:.85rem">{{ formatDate(d.application_deadline) }}</td>
-              <td>{{ d.applicant_count }}</td>
-              <td><span :class="'status-badge '+d.status">{{ d.status }}</span></td>
-              <td>
-                <button class="btn btn-sm btn-outline-primary"
-                  @click="viewDrive(d)">Manage</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+
+        <div class="pp-card h-100">
+          <div class="d-flex align-items-center justify-content-between mb-3">
+            <h6 class="mb-0 fw-bold" style="border-left:3px solid var(--brand);padding-left:.5rem;">Drive</h6>
+            <button class="btn btn-sm btn-link text-decoration-none" @click="goToTab('drives')">View all archives →</button>
+          </div>
+          <div class="d-flex flex-column gap-2 company-drive-compact-list">
+            <div v-for="d in recentDrives.slice(0,4)" :key="'compact_recent_'+d.id" class="d-flex align-items-center justify-content-between p-2 rounded" style="background:var(--surface-1)">
+              <div class="pe-2">
+                <div class="fw-semibold" style="font-size:.88rem;">{{ d.title }}</div>
+                <div class="text-muted" style="font-size:.79rem;">Deadline · {{ formatDate(d.application_deadline) }}</div>
+              </div>
+              <span :class="'status-badge '+d.status">{{ d.status }}</span>
+            </div>
+            <div v-if="!recentDrives.length" class="empty-state" style="padding:1rem .5rem;">
+              <i class="bi bi-briefcase"></i>No active drives yet.
+            </div>
+          </div>
+        </div>
+
+        <div class="pp-card h-100">
+          <h6 class="fw-bold mb-3">Recruitment Snapshot</h6>
+          <div class="d-flex flex-column gap-2" style="font-size:.84rem;">
+            <div class="d-flex justify-content-between"><span>Approved drives</span><strong>{{ stats.approved_drives || 0 }}</strong></div>
+            <div class="d-flex justify-content-between"><span>Total applicants</span><strong>{{ stats.total_applicants || 0 }}</strong></div>
+            <div class="d-flex justify-content-between"><span>Offers sent</span><strong>{{ stats.total_offered || 0 }}</strong></div>
+            <div class="d-flex justify-content-between"><span>Students joined</span><strong>{{ stats.total_selected || 0 }}</strong></div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -146,7 +266,7 @@ const CompanyDashboard = {
     <!-- ── TAB: Applications (for selected drive) ──────────── -->
     <div v-if="activeTab==='applications'">
       <div class="d-flex align-items-center gap-2 mb-3">
-        <button class="btn btn-sm btn-outline-secondary" @click="activeTab='drives'">
+        <button class="btn btn-sm btn-outline-secondary" @click="goToTab('drives')">
           <i class="bi bi-arrow-left me-1"></i>Back
         </button>
         <h6 class="mb-0 fw-600">{{ selectedDrive?.title }} — Applications</h6>
@@ -211,7 +331,7 @@ const CompanyDashboard = {
                 <option v-for="s in appStatuses" :key="s" :value="s">{{ s }}</option>
               </select>
               <button
-                v-if="['shortlisted','waiting','selected'].includes(a.status)"
+                v-if="['interview','interview_accepted'].includes(a.status)"
                 class="btn btn-sm btn-outline-success"
                 @click="sendOfferLetter(a)"
               >
@@ -237,16 +357,16 @@ const CompanyDashboard = {
           </div>
           <div>
             <div class="stat-value">{{ history.length }}</div>
-            <div class="stat-label">Total students selected</div>
+            <div class="stat-label">Total students joined</div>
           </div>
         </div>
         <div v-if="history.length===0" class="empty-state pp-card">
-          <i class="bi bi-people"></i>No students selected yet
+          <i class="bi bi-people"></i>No students joined yet
         </div>
         <div v-else class="pp-card">
           <table class="pp-table">
             <thead>
-              <tr><th>Student</th><th>Drive</th><th>Interview</th><th>Selected on</th></tr>
+              <tr><th>Student</th><th>Drive</th><th>Interview</th><th>Joined on</th></tr>
             </thead>
             <tbody>
               <tr v-for="a in history" :key="a.id">
@@ -420,20 +540,23 @@ const CompanyDashboard = {
       </div>
     </div>
 
+    </div>
   </div>
   `,
 
   data() {
     return {
-      activeTab: "overview",
+      activeTab: this.section || "overview",
       tabs: [
         { key: "overview",  label: "Overview",     icon: "bi bi-speedometer2" },
         { key: "drives",    label: "Drives",        icon: "bi bi-briefcase" },
-        { key: "history",   label: "Hired",         icon: "bi bi-trophy" },
+        { key: "applications", label: "Applicants", icon: "bi bi-people" },
+        { key: "history",   label: "Joined",        icon: "bi bi-trophy" },
         { key: "profile",   label: "Profile",       icon: "bi bi-building-gear" },
       ],
       company:       {},
       stats:         {},
+      diversityBreakdown: [],
       recentDrives:  [],
       drives:        [],
       applications:  [],
@@ -452,21 +575,89 @@ const CompanyDashboard = {
       driveValidation: { submitted: false },
       driveStatusFilter: "",
       appStatusFilter:   "",
-      appStatuses: ["applied","shortlisted","waiting","offered","hired","selected","offer_declined","rejected"],
+      appStatuses: ["applied","accepted","interview","interview_accepted","offered","joined","offer_withdrawn","void_joined_elsewhere","rejected"],
       profileForm: { description:"", website:"", industry:"", location:"", hr_name:"", hr_email:"", hr_phone:"" },
       driveForm:   { title:"", description:"", job_type:"", location:"", salary_lpa:"", min_cgpa:0,
                      eligible_branches:"", eligible_years:"", application_deadline:"", drive_date:"" },
       driveModal:    { show: false, editing: false, driveId: null },
       scheduleModal: { show: false, app: null },
       scheduleForm:  { interview_type: "in-person", interview_date: "", remarks: "" },
+      hoveredDiversity: null,
       alert: { msg: "", type: "success" },
     };
   },
 
   watch: {
+    section(next) {
+      this.activeTab = next || "overview";
+    },
     activeTab(tab) {
       if (tab === "drives")  this.fetchDrives();
+      if (tab === "applications") this.fetchApplications();
       if (tab === "history") this.fetchHistory();
+    }
+  },
+
+  computed: {
+    diversitySegments() {
+      const palette = ["#003f87", "#983c00", "#5f6b73", "#1b8752", "#7a3e00", "#0056b3", "#7b1fa2", "#455a64"];
+      const safe = Array.isArray(this.diversityBreakdown) ? this.diversityBreakdown : [];
+      const normalized = safe
+        .map((item) => ({
+          label: String(item?.label || "Unknown"),
+          count: Number(item?.count || 0),
+        }))
+        .filter((item) => item.count > 0);
+
+      const total = normalized.reduce((sum, item) => sum + item.count, 0);
+      if (!total) return [];
+
+      return normalized.map((item, index) => {
+        const percentRaw = (item.count / total) * 100;
+        return {
+          ...item,
+          percentRaw,
+          percent: percentRaw >= 10 ? Math.round(percentRaw) : Number(percentRaw.toFixed(1)),
+          color: palette[index % palette.length],
+        };
+      });
+    },
+
+    diversityPieSlices() {
+      if (!this.diversitySegments.length) return [];
+
+      let startAngle = -Math.PI / 2;
+      return this.diversitySegments.map((segment) => {
+        const sweep = (segment.percentRaw / 100) * Math.PI * 2;
+        const endAngle = startAngle + sweep;
+        const path = this.describePieSlice(100, 100, 92, startAngle, endAngle);
+        startAngle = endAngle;
+        return {
+          ...segment,
+          path,
+        };
+      });
+    },
+
+    applicantVelocityBars() {
+      const drives = Array.isArray(this.recentDrives) ? this.recentDrives.slice(0, 7) : [];
+      if (!drives.length) {
+        return Array.from({ length: 7 }, (_, index) => ({
+          height: 20,
+          highlight: index === 6,
+        }));
+      }
+
+      const counts = drives.map((drive) => Number(drive?.applicant_count || 0));
+      const max = Math.max(...counts, 1);
+
+      return counts.map((count, index) => {
+        const scaled = Math.round((count / max) * 100);
+        return {
+          height: Math.max(scaled, 12),
+          highlight: index === counts.length - 1,
+        };
+      });
     }
   },
 
@@ -483,6 +674,36 @@ const CompanyDashboard = {
   },
 
   methods: {
+    describePieSlice(cx, cy, radius, startAngle, endAngle) {
+      const start = this.polarToCartesian(cx, cy, radius, startAngle);
+      const end = this.polarToCartesian(cx, cy, radius, endAngle);
+      const largeArcFlag = endAngle - startAngle > Math.PI ? 1 : 0;
+      return `M ${cx} ${cy} L ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${end.x} ${end.y} Z`;
+    },
+
+    polarToCartesian(cx, cy, radius, angleInRadians) {
+      return {
+        x: cx + radius * Math.cos(angleInRadians),
+        y: cy + radius * Math.sin(angleInRadians),
+      };
+    },
+
+    routeForTab(tab) {
+      const map = {
+        overview: "/company/dashboard",
+        drives: "/company/drives",
+        applications: "/company/applications",
+        history: "/company/hiring-history",
+        profile: "/company/settings",
+      };
+      return map[tab] || "/company/dashboard";
+    },
+
+    goToTab(tab) {
+      const target = this.routeForTab(tab);
+      if (this.$route.path !== target) this.$router.push(target);
+    },
+
     async refreshCurrentView(silent = false) {
       await this.fetchDashboard(silent);
       if (this.activeTab === "drives") await this.fetchDrives(silent);
@@ -496,6 +717,7 @@ const CompanyDashboard = {
         const { data } = await ApiService.companyDashboard();
         this.company      = data.company;
         this.stats        = data.stats;
+        this.diversityBreakdown = data.diversity_breakdown || [];
         this.recentDrives = data.recent_drives;
         this.profileForm  = {
           description: this.company.description || "",
@@ -552,7 +774,7 @@ const CompanyDashboard = {
     viewDrive(drive) {
       this.selectedDrive = drive;
       this.appStatusFilter = "";
-      this.activeTab = "applications";
+      this.goToTab("applications");
       this.fetchApplications();
     },
 
@@ -566,7 +788,6 @@ const CompanyDashboard = {
     },
 
     openEditDrive(drive) {
-      const fmt = dt => dt ? new Date(dt).toISOString().slice(0,16) : "";
       this.driveForm = {
         title:                drive.title,
         description:          drive.description,
@@ -580,8 +801,8 @@ const CompanyDashboard = {
         eligible_years:       Array.isArray(drive.eligible_years)
                                 ? drive.eligible_years.join(",")
                                 : (drive.eligible_years || ""),
-        application_deadline: fmt(drive.application_deadline),
-        drive_date:           fmt(drive.drive_date),
+        application_deadline: this.formatIstDateTimeLocal(drive.application_deadline),
+        drive_date:           this.formatIstDateTimeLocal(drive.drive_date),
       };
       this.driveValidation.submitted = false;
       this.driveModal = { show: true, editing: true, driveId: drive.id };
@@ -592,13 +813,28 @@ const CompanyDashboard = {
       if (!this.driveForm.title || !this.driveForm.description || !this.driveForm.application_deadline) {
         return this.showAlert("Title, description and deadline are required", "danger");
       }
+
+      const deadlineIso = this.istLocalToUtcIso(this.driveForm.application_deadline);
+      if (!deadlineIso) {
+        return this.showAlert("Invalid application deadline format", "danger");
+      }
+
+      let driveDateIso;
+      if (this.driveForm.drive_date) {
+        driveDateIso = this.istLocalToUtcIso(this.driveForm.drive_date);
+        if (!driveDateIso) {
+          return this.showAlert("Invalid drive date format", "danger");
+        }
+      }
+
       this.savingDrive = true;
-      const payload = { ...this.driveForm,
-        application_deadline: new Date(this.driveForm.application_deadline).toISOString(),
-        drive_date: this.driveForm.drive_date
-          ? new Date(this.driveForm.drive_date).toISOString() : undefined,
-      };
       try {
+        const payload = {
+          ...this.driveForm,
+          application_deadline: deadlineIso,
+          drive_date: driveDateIso,
+        };
+
         if (this.driveModal.editing) {
           await ApiService.companyUpdateDrive(this.driveModal.driveId, payload);
           this.showAlert("Drive updated and resubmitted for approval", "success");
@@ -609,7 +845,12 @@ const CompanyDashboard = {
         this.driveModal.show = false;
         await this.refreshCurrentView(true);
       } catch (e) {
-        this.showAlert(e.response?.data?.message || "Failed to save drive", "danger");
+        const errorMessage =
+          e?.response?.data?.message ||
+          e?.response?.data?.msg ||
+          e?.message ||
+          "Failed to save drive";
+        this.showAlert(errorMessage, "danger");
       } finally { this.savingDrive = false; }
     },
 
@@ -674,11 +915,17 @@ const CompanyDashboard = {
 
     async saveSchedule() {
       const app = this.scheduleModal.app;
+      const interviewDateIso = this.scheduleForm.interview_date
+        ? this.istLocalToUtcIso(this.scheduleForm.interview_date)
+        : undefined;
+      if (this.scheduleForm.interview_date && !interviewDateIso) {
+        return this.showAlert("Invalid interview date format", "danger");
+      }
+
       const payload = {
-        status:         "shortlisted",
+        status:         "interview",
         interview_type: this.scheduleForm.interview_type,
-        interview_date: this.scheduleForm.interview_date
-          ? new Date(this.scheduleForm.interview_date).toISOString() : undefined,
+        interview_date: interviewDateIso,
         remarks:        this.scheduleForm.remarks,
       };
       try {
@@ -686,7 +933,7 @@ const CompanyDashboard = {
         Object.assign(app, payload);
         this.scheduleModal.show = false;
         await this.refreshCurrentView(true);
-        this.showAlert("Interview scheduled and student shortlisted", "success");
+        this.showAlert("Interview scheduled", "success");
       } catch (e) { this.showAlert(e.response?.data?.message || "Failed", "danger"); }
     },
 
@@ -702,7 +949,43 @@ const CompanyDashboard = {
 
     formatDate(dt) {
       if (!dt) return "—";
-      return new Date(dt).toLocaleDateString("en-IN", { day:"numeric", month:"short", year:"numeric" });
+      return new Date(dt).toLocaleDateString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
+    },
+
+    formatStatusLabel(status) {
+      if (!status) return "Pending";
+      return status.charAt(0).toUpperCase() + status.slice(1);
+    },
+
+    formatIstDateTimeLocal(dt) {
+      if (!dt) return "";
+      const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).formatToParts(new Date(dt));
+      const values = Object.fromEntries(parts.filter(p => p.type !== "literal").map(p => [p.type, p.value]));
+      return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
+    },
+
+    istLocalToUtcIso(value) {
+      if (!value) return null;
+      const [datePart, timePart] = value.split("T");
+      if (!datePart || !timePart) return null;
+      const [year, month, day] = datePart.split("-").map(Number);
+      const [hour, minute] = timePart.split(":").map(Number);
+      if ([year, month, day, hour, minute].some(Number.isNaN)) return null;
+      const utcMillis = Date.UTC(year, month - 1, day, hour - 5, minute - 30, 0);
+      return new Date(utcMillis).toISOString();
     },
 
     showAlert(msg, type = "success") {

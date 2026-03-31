@@ -1,5 +1,6 @@
 from datetime import datetime
 from app.extensions import db
+from app.utils.datetime_utils import to_ist_iso
 
 
 class PlacementDrive(db.Model):
@@ -87,10 +88,12 @@ class PlacementDrive(db.Model):
             "eligible_branches":    self.eligible_branches_list(),
             "eligible_years":       self.eligible_years_list(),
             "min_cgpa":             self.min_cgpa,
-            "application_deadline": self.application_deadline.isoformat(),
-            "drive_date":           self.drive_date.isoformat() if self.drive_date else None,
+            "application_deadline": to_ist_iso(self.application_deadline),
+            "drive_date":           to_ist_iso(self.drive_date),
             "status":               self.status,
             "applicant_count":      len(self.applications),
+            "created_at":           to_ist_iso(self.created_at),
+            "updated_at":           to_ist_iso(self.updated_at),
         }
 
     def __repr__(self):

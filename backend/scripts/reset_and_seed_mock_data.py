@@ -1,4 +1,5 @@
 import os
+import random
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
@@ -14,8 +15,15 @@ load_dotenv(os.path.join(BACKEND_DIR, ".env"), override=True)
 
 
 def seed_users_and_profiles():
+    random.seed(42)
+
+    target_students = int(os.getenv("SEED_STUDENT_COUNT", "1000"))
+    target_companies = int(os.getenv("SEED_COMPANY_COUNT", "15"))
+
     admin_email = os.getenv("ADMIN_EMAIL", "admin@placement.com").strip().lower()
     admin_password = os.getenv("ADMIN_PASSWORD", "Admin@1234")
+    company_password = os.getenv("SEED_COMPANY_PASSWORD", "Company@123")
+    student_password = os.getenv("SEED_STUDENT_PASSWORD", "Student@123")
 
     admin = User(
         email=admin_email,
@@ -24,221 +32,344 @@ def seed_users_and_profiles():
         is_active=True,
     )
 
-    company_users = [
-        User(email="hr@amazon.com", password_hash=generate_password_hash("Company@123"), role="company", is_active=True),
-        User(email="careers@microsoft.com", password_hash=generate_password_hash("Company@123"), role="company", is_active=True),
-        User(email="hiring@startupx.io", password_hash=generate_password_hash("Company@123"), role="company", is_active=True),
+    company_names = [
+        "Amazon", "Microsoft", "Google", "Adobe", "Salesforce",
+        "Infosys", "TCS", "Wipro", "Accenture", "Deloitte",
+        "Flipkart", "Zomato", "Razorpay", "Zoho", "NVIDIA",
+        "Intel", "Oracle", "Paytm", "Cognizant", "Siemens",
+    ]
+    industries = [
+        "Technology", "Cloud", "FinTech", "Consulting", "E-commerce",
+        "SaaS", "Semiconductors", "Analytics", "Enterprise Software",
+    ]
+    locations = [
+        "Bangalore", "Hyderabad", "Chennai", "Pune", "Noida", "Gurgaon", "Mumbai", "Remote",
     ]
 
-    student_users = [
-        User(email="student1@test.com", password_hash=generate_password_hash("Student@123"), role="student", is_active=True),
-        User(email="student2@test.com", password_hash=generate_password_hash("Student@123"), role="student", is_active=True),
-        User(email="student3@test.com", password_hash=generate_password_hash("Student@123"), role="student", is_active=True),
-        User(email="student4@test.com", password_hash=generate_password_hash("Student@123"), role="student", is_active=True),
-        User(email="student5@test.com", password_hash=generate_password_hash("Student@123"), role="student", is_active=True),
+    first_names = [
+        "Aarav", "Aditi", "Akhil", "Ananya", "Arjun", "Bhavya", "Darsh", "Deepika", "Dev", "Diya",
+        "Eshan", "Gauri", "Harsh", "Ishita", "Jatin", "Kavya", "Kiran", "Laksh", "Meera", "Naman",
+        "Neha", "Om", "Pooja", "Pranav", "Priya", "Rahul", "Riya", "Rohan", "Saanvi", "Sakshi",
+        "Sanjay", "Shreya", "Sneha", "Tanvi", "Tarun", "Uday", "Vaibhav", "Vidhi", "Vivek", "Yash",
     ]
+    last_names = [
+        "Agarwal", "Bansal", "Chopra", "Das", "Ghosh", "Gupta", "Iyer", "Jain", "Kapoor", "Khan",
+        "Kulkarni", "Menon", "Mishra", "Nair", "Pandey", "Patel", "Rao", "Reddy", "Sen", "Shah",
+        "Sharma", "Singh", "Srinivasan", "Tiwari", "Varma", "Verma", "Yadav", "Pillai", "Joshi", "Malhotra",
+    ]
+    branches = ["CS", "IT", "ECE", "EE", "ME", "CE", "AI", "DS"]
+
+    drive_titles = [
+        "Software Engineer", "Backend Developer", "Frontend Developer", "Data Analyst", "Data Engineer",
+        "ML Engineer", "QA Engineer", "DevOps Engineer", "Product Analyst", "Business Analyst",
+        "Security Engineer", "Cloud Engineer", "Site Reliability Engineer", "Full Stack Engineer",
+    ]
+    job_types = ["full-time", "internship"]
+
+    company_users = []
+    companies = []
+
+    selected_company_names = company_names[:target_companies]
+    for i, company_name in enumerate(selected_company_names):
+        slug = company_name.lower().replace(" ", "")
+        email = f"hr{str(i + 1).zfill(2)}@{slug}.com"
+
+        user = User(
+            email=email,
+            password_hash=generate_password_hash(company_password),
+            role="company",
+            is_active=True,
+        )
+        company_users.append(user)
+
+    student_users = []
+    students = []
+
+    for i in range(target_students):
+        student_idx = i + 1
+        email = f"student{student_idx:04d}@test.com"
+        user = User(
+            email=email,
+            password_hash=generate_password_hash(student_password),
+            role="student",
+            is_active=True,
+        )
+        student_users.append(user)
 
     db.session.add(admin)
     db.session.add_all(company_users)
     db.session.add_all(student_users)
     db.session.flush()
 
-    companies = [
-        Company(
-            user_id=company_users[0].id,
-            name="Amazon",
-            description="Global e-commerce and cloud company",
-            website="https://www.amazon.jobs",
-            industry="Technology",
-            location="Bangalore",
-            hr_name="Riya Sharma",
-            hr_email="hr@amazon.com",
-            hr_phone="+91-9000000001",
-            approval_status="approved",
-            is_blacklisted=False,
-        ),
-        Company(
-            user_id=company_users[1].id,
-            name="Microsoft",
-            description="Cloud and productivity solutions company",
-            website="https://careers.microsoft.com",
-            industry="Technology",
-            location="Hyderabad",
-            hr_name="Kunal Verma",
-            hr_email="careers@microsoft.com",
-            hr_phone="+91-9000000002",
-            approval_status="approved",
-            is_blacklisted=False,
-        ),
-        Company(
-            user_id=company_users[2].id,
-            name="StartupX",
-            description="Early-stage SaaS startup",
-            website="https://startupx.io",
-            industry="SaaS",
-            location="Remote",
-            hr_name="Nikita Rao",
-            hr_email="hiring@startupx.io",
-            hr_phone="+91-9000000003",
-            approval_status="pending",
-            is_blacklisted=False,
-        ),
-    ]
+    for idx, (company_user, company_name) in enumerate(zip(company_users, selected_company_names), start=1):
+        status = "approved"
+        rejection_reason = None
+        if idx in {target_companies - 1, target_companies}:
+            status = "pending"
+        if idx == target_companies - 2:
+            status = "rejected"
+            rejection_reason = "Incomplete compliance documents"
 
-    students = [
-        Student(
-            user_id=student_users[0].id,
-            full_name="Aman Gupta",
-            phone="+919900000001",
-            dob=datetime(2003, 1, 10).date(),
-            roll_number="CS2024001",
-            branch="CS",
-            year=4,
-            cgpa=8.7,
-        ),
-        Student(
-            user_id=student_users[1].id,
-            full_name="Priya Singh",
-            phone="+919900000002",
-            dob=datetime(2003, 3, 21).date(),
-            roll_number="IT2024002",
-            branch="IT",
-            year=4,
-            cgpa=9.1,
-        ),
-        Student(
-            user_id=student_users[2].id,
-            full_name="Rahul Das",
-            phone="+919900000003",
-            dob=datetime(2004, 6, 12).date(),
-            roll_number="ECE2025001",
-            branch="ECE",
-            year=3,
-            cgpa=7.8,
-        ),
-        Student(
-            user_id=student_users[3].id,
-            full_name="Sneha Iyer",
-            phone="+919900000004",
-            dob=datetime(2004, 8, 2).date(),
-            roll_number="EE2025004",
-            branch="EE",
-            year=3,
-            cgpa=8.2,
-        ),
-        Student(
-            user_id=student_users[4].id,
-            full_name="Vikas Patel",
-            phone="+919900000005",
-            dob=datetime(2005, 2, 5).date(),
-            roll_number="ME2026002",
-            branch="ME",
-            year=2,
-            cgpa=7.1,
-        ),
-    ]
+        hr_name = f"{random.choice(first_names)} {random.choice(last_names)}"
+        company_slug = company_name.lower().replace(" ", "")
+
+        companies.append(
+            Company(
+                user_id=company_user.id,
+                name=company_name,
+                description=f"{company_name} runs campus hiring programs for engineering and product roles.",
+                website=f"https://careers.{company_slug}.com",
+                industry=random.choice(industries),
+                location=random.choice(locations),
+                hr_name=hr_name,
+                hr_email=company_user.email,
+                hr_phone=f"+91-9{idx:09d}",
+                approval_status=status,
+                rejection_reason=rejection_reason,
+                is_blacklisted=False,
+            )
+        )
+
+    for i, student_user in enumerate(student_users, start=1):
+        branch = random.choice(branches)
+        year = random.choices([2, 3, 4], weights=[0.15, 0.4, 0.45], k=1)[0]
+        full_name = f"{random.choice(first_names)} {random.choice(last_names)}"
+        cgpa = round(random.uniform(6.0, 9.9), 2)
+        dob_year = 2001 if year == 4 else (2002 if year == 3 else 2003)
+        dob = datetime(dob_year, random.randint(1, 12), random.randint(1, 28)).date()
+
+        students.append(
+            Student(
+                user_id=student_user.id,
+                full_name=full_name,
+                phone=f"+9198{i:08d}",
+                dob=dob,
+                branch=branch,
+                year=year,
+                cgpa=cgpa,
+                resume_path=f"uploads/resumes/student_{i:04d}.pdf" if random.random() < 0.7 else None,
+            )
+        )
 
     db.session.add_all(companies)
     db.session.add_all(students)
     db.session.flush()
 
     now = datetime.utcnow()
-    drives = [
-        PlacementDrive(
-            company_id=companies[0].id,
-            title="SDE-1 Full Time",
-            description="Backend/API development role",
-            job_type="full-time",
-            location="Bangalore",
-            salary_lpa=18.0,
-            eligible_branches="CS,IT,ECE",
-            min_cgpa=8.0,
-            eligible_years="4",
-            application_deadline=now + timedelta(days=8),
-            drive_date=now + timedelta(days=15),
-            status="approved",
-        ),
-        PlacementDrive(
-            company_id=companies[0].id,
-            title="QA Engineer",
-            description="Testing and automation",
-            job_type="full-time",
-            location="Hyderabad",
-            salary_lpa=10.0,
-            eligible_branches="CS,IT,EE",
-            min_cgpa=7.0,
-            eligible_years="3,4",
-            application_deadline=now + timedelta(days=4),
-            drive_date=now + timedelta(days=10),
-            status="pending",
-        ),
-        PlacementDrive(
-            company_id=companies[1].id,
-            title="Software Intern",
-            description="6-month internship",
-            job_type="internship",
-            location="Remote",
-            salary_lpa=6.0,
-            eligible_branches="CS,IT,ECE",
-            min_cgpa=7.5,
-            eligible_years="3,4",
-            application_deadline=now + timedelta(days=6),
-            drive_date=now + timedelta(days=12),
-            status="approved",
-        ),
-        PlacementDrive(
-            company_id=companies[1].id,
-            title="Data Analyst",
-            description="Analytics and dashboards",
-            job_type="full-time",
-            location="Noida",
-            salary_lpa=12.0,
-            eligible_branches="CS,IT,EE",
-            min_cgpa=8.0,
-            eligible_years="4",
-            application_deadline=now + timedelta(days=5),
-            drive_date=now + timedelta(days=13),
-            status="rejected",
-            rejection_reason="Role requirements not clearly defined",
-        ),
-        PlacementDrive(
-            company_id=companies[0].id,
-            title="Support Engineer",
-            description="Closed drive sample",
-            job_type="full-time",
-            location="Pune",
-            salary_lpa=7.0,
-            eligible_branches="CS,IT",
-            min_cgpa=6.5,
-            eligible_years="4",
-            application_deadline=now - timedelta(days=5),
-            drive_date=now - timedelta(days=2),
-            status="closed",
-        ),
-    ]
+    drives = []
+    approved_companies = [c for c in companies if c.approval_status == "approved"]
+
+    for company in companies:
+        if company.approval_status == "approved":
+            per_company_drives = random.randint(4, 7)
+            status_pool = ["approved", "approved", "approved", "closed", "pending"]
+        elif company.approval_status == "pending":
+            per_company_drives = random.randint(1, 2)
+            status_pool = ["pending"]
+        else:
+            per_company_drives = 1
+            status_pool = ["rejected"]
+
+        for _ in range(per_company_drives):
+            status = random.choice(status_pool)
+            job_type = random.choice(job_types)
+            title = f"{random.choice(drive_titles)} {random.choice(['I', 'II', 'Intern', 'Associate'])}"
+            eligible_branch_count = random.randint(3, 6)
+            eligible_branch_list = random.sample(branches, k=eligible_branch_count)
+            eligible_years_list = [3, 4] if job_type == "internship" else random.choice([[4], [3, 4]])
+            min_cgpa = round(random.uniform(6.5, 8.5), 1)
+
+            deadline_offset = random.randint(4, 28)
+            drive_offset = deadline_offset + random.randint(5, 20)
+            application_deadline = now + timedelta(days=deadline_offset)
+            drive_date = now + timedelta(days=drive_offset)
+            rejection_reason = None
+
+            if status == "closed":
+                application_deadline = now - timedelta(days=random.randint(5, 35))
+                drive_date = application_deadline + timedelta(days=random.randint(3, 12))
+            if status == "rejected":
+                rejection_reason = "Role requirements were not clear for candidates"
+
+            drives.append(
+                PlacementDrive(
+                    company_id=company.id,
+                    title=title,
+                    description=f"{title} role for {company.name}. Hiring for production-grade engineering and problem-solving capability.",
+                    job_type=job_type,
+                    location=random.choice(locations),
+                    salary_lpa=round(random.uniform(4.5, 28.0), 1),
+                    eligible_branches=",".join(eligible_branch_list),
+                    min_cgpa=min_cgpa,
+                    eligible_years=",".join(str(y) for y in eligible_years_list),
+                    application_deadline=application_deadline,
+                    drive_date=drive_date,
+                    status=status,
+                    rejection_reason=rejection_reason,
+                )
+            )
 
     db.session.add_all(drives)
     db.session.flush()
 
-    applications = [
-        Application(student_id=students[0].id, drive_id=drives[0].id, status="hired", remarks="Joined successfully"),
-        Application(student_id=students[1].id, drive_id=drives[0].id, status="offered", remarks="https://example.com/offer/student2"),
-        Application(student_id=students[2].id, drive_id=drives[0].id, status="shortlisted", interview_type="online", interview_date=now + timedelta(days=2), remarks="Round 1 cleared"),
-        Application(student_id=students[3].id, drive_id=drives[2].id, status="selected", interview_type="in-person", interview_date=now + timedelta(days=3), remarks="Selected for final round"),
-        Application(student_id=students[4].id, drive_id=drives[2].id, status="rejected", remarks="CGPA below threshold"),
-        Application(student_id=students[0].id, drive_id=drives[2].id, status="waiting", remarks="Awaiting final decision"),
+    open_drives = [d for d in drives if d.status in {"approved", "closed"}]
+
+    applications = []
+    status_weights_open = [
+        ("applied", 0.46),
+        ("shortlisted", 0.16),
+        ("waiting", 0.14),
+        ("selected", 0.08),
+        ("offered", 0.07),
+        ("hired", 0.03),
+        ("offer_declined", 0.02),
+        ("rejected", 0.04),
     ]
+    status_weights_closed = [
+        ("hired", 0.12),
+        ("offered", 0.18),
+        ("selected", 0.14),
+        ("offer_declined", 0.08),
+        ("shortlisted", 0.1),
+        ("rejected", 0.3),
+        ("waiting", 0.08),
+    ]
+
+    cumulative = []
+    running = 0.0
+    for status, weight in status_weights_open:
+        running += weight
+        cumulative.append((status, running))
+
+    cumulative_closed = []
+    running_closed = 0.0
+    for status, weight in status_weights_closed:
+        running_closed += weight
+        cumulative_closed.append((status, running_closed))
+
+    def choose_status(drive_status):
+        r = random.random()
+        table = cumulative_closed if drive_status == "closed" else cumulative
+        for status, cutoff in table:
+            if r <= cutoff:
+                return status
+        return table[-1][0]
+
+    for student in students:
+        target_applications = random.randint(3, 10)
+
+        eligible = [
+            d for d in open_drives
+            if student.branch in d.eligible_branches_list()
+            and student.year in d.eligible_years_list()
+            and student.cgpa >= d.min_cgpa
+            and d.company_id in {c.id for c in approved_companies}
+        ]
+
+        if not eligible:
+            continue
+
+        chosen_drives = random.sample(eligible, k=min(target_applications, len(eligible)))
+        for drive in chosen_drives:
+            status = choose_status(drive.status)
+            interview_type = None
+            interview_date = None
+            remarks = None
+
+            if status in {"shortlisted", "selected", "offered", "hired", "waiting"}:
+                interview_type = random.choice(["online", "in-person"])
+                interview_date = drive.drive_date - timedelta(days=random.randint(1, 10)) if drive.drive_date else None
+
+            if status == "offered":
+                remarks = f"https://offers.example.com/student-{student.id}-{drive.id}"
+            elif status == "hired":
+                remarks = "Candidate onboarded successfully"
+            elif status == "rejected":
+                remarks = random.choice([
+                    "Technical round did not meet bar",
+                    "Communication round not cleared",
+                    "Profile mismatch for role",
+                ])
+            elif status == "waiting":
+                remarks = "Awaiting final hiring committee decision"
+
+            applications.append(
+                Application(
+                    student_id=student.id,
+                    drive_id=drive.id,
+                    status=status,
+                    interview_type=interview_type,
+                    interview_date=interview_date,
+                    remarks=remarks,
+                    applied_at=drive.application_deadline - timedelta(days=random.randint(1, 20)),
+                )
+            )
 
     db.session.add_all(applications)
     db.session.flush()
 
-    notifications = [
-        Notification(user_id=students[0].user_id, title="You are hired", message="Congrats! You have been marked as hired.", type="success"),
-        Notification(user_id=students[1].user_id, title="Offer letter sent", message="Please check your email for the offer letter.", type="info"),
-        Notification(user_id=students[2].user_id, title="Interview scheduled", message="Your interview has been scheduled.", type="warning"),
-        Notification(user_id=companies[0].user_id, title="Drive approved", message="SDE-1 Full Time has been approved.", type="success"),
-        Notification(user_id=companies[1].user_id, title="Drive rejected", message="Data Analyst drive was rejected by admin.", type="danger"),
-    ]
+    notifications = []
+
+    for student in random.sample(students, k=min(250, len(students))):
+        notifications.append(
+            Notification(
+                user_id=student.user_id,
+                title="New drive matches your profile",
+                message="Fresh approved drives are now open for your branch and CGPA.",
+                type="info",
+                is_read=random.random() < 0.35,
+            )
+        )
+
+    for app in random.sample(applications, k=min(400, len(applications))):
+        title = "Application update"
+        notif_type = "info"
+        if app.status in {"offered", "hired", "selected"}:
+            title = "Great news on your application"
+            notif_type = "success"
+        elif app.status == "rejected":
+            title = "Application status changed"
+            notif_type = "warning"
+
+        notifications.append(
+            Notification(
+                user_id=app.student.user_id,
+                title=title,
+                message=f"Your application for {app.drive.title} at {app.drive.company.name} is now '{app.status}'.",
+                type=notif_type,
+                is_read=random.random() < 0.45,
+            )
+        )
+
+    for company in companies:
+        if company.approval_status == "approved":
+            notifications.append(
+                Notification(
+                    user_id=company.user_id,
+                    title="Company profile approved",
+                    message="Your company can now publish and manage placement drives.",
+                    type="success",
+                )
+            )
+        elif company.approval_status == "pending":
+            notifications.append(
+                Notification(
+                    user_id=company.user_id,
+                    title="Approval pending",
+                    message="Your company profile is under admin review.",
+                    type="warning",
+                )
+            )
+        else:
+            notifications.append(
+                Notification(
+                    user_id=company.user_id,
+                    title="Company profile rejected",
+                    message=company.rejection_reason or "Please resubmit with required compliance information.",
+                    type="danger",
+                )
+            )
+
     db.session.add_all(notifications)
 
     db.session.commit()
@@ -246,6 +377,18 @@ def seed_users_and_profiles():
     return {
         "admin_email": admin_email,
         "admin_password": admin_password,
+        "company_password": company_password,
+        "student_password": student_password,
+        "company_email": company_users[0].email if company_users else "",
+        "company_email_2": company_users[1].email if len(company_users) > 1 else "",
+        "student_email": student_users[0].email if student_users else "",
+        "counts": {
+            "companies": len(companies),
+            "students": len(students),
+            "drives": len(drives),
+            "applications": len(applications),
+            "notifications": len(notifications),
+        },
     }
 
 
@@ -256,13 +399,20 @@ def main():
         db.create_all()
         creds = seed_users_and_profiles()
 
-    print("\n✅ Database reset and mock data inserted successfully.")
+    print("\n✅ Database reset and seeded data inserted successfully.")
+    print("\nSeed Summary:")
+    print(f"- Companies:    {creds['counts']['companies']}")
+    print(f"- Students:     {creds['counts']['students']}")
+    print(f"- Drives:       {creds['counts']['drives']}")
+    print(f"- Applications: {creds['counts']['applications']}")
+    print(f"- Notifications:{creds['counts']['notifications']}")
+
     print("\nTest Credentials:")
     print(f"- Admin:   {creds['admin_email']} / {creds['admin_password']}")
-    print("- Company: hr@amazon.com / Company@123")
-    print("- Company: careers@microsoft.com / Company@123")
-    print("- Student: student1@test.com / Student@123")
-    print("- Student: student2@test.com / Student@123")
+    print(f"- Company: {creds['company_email']} / {creds['company_password']}")
+    if creds["company_email_2"]:
+        print(f"- Company: {creds['company_email_2']} / {creds['company_password']}")
+    print(f"- Student: {creds['student_email']} / {creds['student_password']}")
 
 
 if __name__ == "__main__":

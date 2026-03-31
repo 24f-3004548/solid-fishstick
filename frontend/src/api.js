@@ -2,10 +2,10 @@
 const API_HOST = window.location.hostname === "localhost"
   ? "127.0.0.1"
   : window.location.hostname;
-
+const API_PORT = window.__API_PORT__ || "5001";
 const API_BASE =
   window.__API_BASE__ ||
-  `${window.location.protocol}//${API_HOST}:5000/api`;
+  `${window.location.protocol}//${API_HOST}:${API_PORT}/api`;
 
 // ── Reactive auth state ──────────────────────────────────────────────────────
 const initialLoggedIn = sessionStorage.getItem("is_logged_in") === "true";
@@ -118,6 +118,7 @@ const ApiService = {
   adminApplications:   (q)      => api.get("/admin/applications", { params: q }),
   adminSearch:         (q)      => api.get("/admin/search", { params: { q } }),
   adminReport:         ()       => api.get("/admin/reports/summary"),
+  adminSendInstantReport: ()    => api.post("/admin/reports/send-instant"),
   adminSystemHealth:   ()       => api.get("/admin/system/health"),
   adminAuditLogs:      (q)      => api.get("/admin/audit-logs", { params: q }),
 
@@ -152,6 +153,7 @@ const ApiService = {
   studentApply:        (id)     => api.post(`/student/drives/${id}/apply`),
   studentApplications: (q)      => api.get("/student/applications", { params: q }),
   studentApplication:  (id)     => api.get(`/student/applications/${id}`),
+  studentInterviewResponse:(id, d) => api.put(`/student/applications/${id}/interview-response`, d),
   studentOfferResponse:(id, d)  => api.put(`/student/applications/${id}/offer-response`, d),
   studentWithdraw:     (id)     => api.delete(`/student/applications/${id}/withdraw`),
   studentHistory:      ()       => api.get("/student/history"),

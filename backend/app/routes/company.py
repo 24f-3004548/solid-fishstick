@@ -9,6 +9,39 @@ from app.utils.audit import log_audit
 
 company_bp = Blueprint("company", __name__)
 
+STATUS_FLOW = {
+    "applied",
+    "accepted",
+    "interview",
+    "interview_accepted",
+    "offered",
+    "joined",
+    "rejected",
+    "offer_withdrawn",
+    "void_joined_elsewhere",
+}
+
+LEGACY_STATUS_MAP = {
+    "shortlisted": "accepted",
+    "waiting": "interview",
+    "selected": "joined",
+    "hired": "joined",
+    "offer_declined": "rejected",
+}
+
+COMPANY_MUTABLE_STATUSES = ("accepted", "interview", "offered", "rejected", "offer_withdrawn")
+ALLOWED_TRANSITIONS = {
+    "applied": {"accepted", "rejected"},
+    "accepted": {"interview", "rejected"},
+    "interview": {"offered", "rejected"},
+    "interview_accepted": {"offered", "rejected"},
+    "offered": {"offer_withdrawn"},
+    "rejected": set(),
+    "offer_withdrawn": set(),
+    "joined": set(),
+    "void_joined_elsewhere": set(),
+}
+
 # ------------------------------------------------------------------ helpers
 
 def _error(msg, code=400):
@@ -94,6 +127,30 @@ def _parse_iso_datetime(value, field_name):
     return parsed
 
 
+def _normalized_status(status):
+    return LEGACY_STATUS_MAP.get(status, status)
+
+
+def _student_joined_elsewhere(student_id, exclude_app_id=None):
+    query = Application.query.filter(
+        Application.student_id == student_id,
+        Application.status.in_(["joined", "selected", "hired"]),
+    )
+    if exclude_app_id:
+        query = query.filter(Application.id != exclude_app_id)
+    return query.first()
+
+
+def _notification_type_for_status(status):
+    if status in ("accepted", "interview", "interview_accepted", "applied"):
+        return "info"
+    if status in ("offered", "joined"):
+        return "success"
+    if status in ("rejected", "offer_withdrawn", "void_joined_elsewhere"):
+        return "danger"
+    return "warning"
+
+
 # ==================================================================
 # COMPANY PROFILE
 # ==================================================================
@@ -144,18 +201,36 @@ def dashboard():
         "pending_drives":    sum(1 for d in drives if d.status == "pending"),
         "closed_drives":     sum(1 for d in drives if d.status == "closed"),
         "total_applicants":  sum(len(d.applications) for d in drives),
+        "total_offered":     sum(
+            1 for d in drives
+            for a in d.applications if _normalized_status(a.status) in ("offered", "joined")
+        ),
         "total_selected":    sum(
             1 for d in drives
-            for a in d.applications if a.status in ("selected", "hired")
+            for a in d.applications if _normalized_status(a.status) == "joined"
         ),
     }
 
     recent_drives = sorted(drives, key=lambda d: d.created_at, reverse=True)[:5]
 
+    # Diversity breakdown across currently active company drives.
+    active_drives = [d for d in drives if d.status == "approved"]
+    branch_counts = {}
+    for drive in active_drives:
+        for app in drive.applications:
+            branch = (app.student.branch if app.student and app.student.branch else "Unknown")
+            branch_counts[branch] = branch_counts.get(branch, 0) + 1
+
+    diversity_breakdown = [
+        {"label": label, "count": count}
+        for label, count in sorted(branch_counts.items(), key=lambda item: item[1], reverse=True)
+    ]
+
     return _ok({
         "company": company.to_dict(),
         "stats":   stats,
         "recent_drives": [d.to_dict() for d in recent_drives],
+        "diversity_breakdown": diversity_breakdown,
     })
 
 
@@ -406,12 +481,24 @@ def update_application_status(app_id):
     data       = request.get_json(silent=True) or {}
     new_status = data.get("status", "").strip()
 
-    valid_statuses = ("shortlisted", "waiting", "offered", "hired", "selected", "rejected", "offer_declined")
-    if new_status not in valid_statuses:
-        return _error(f"Status must be one of: {', '.join(valid_statuses)}")
+    if new_status not in COMPANY_MUTABLE_STATUSES:
+        return _error(f"Status must be one of: {', '.join(COMPANY_MUTABLE_STATUSES)}")
 
-    if new_status == "hired" and app.status not in ("offered", "selected"):
-        return _error("Application must be offered before marking as hired")
+    current_status = _normalized_status(app.status)
+    allowed = ALLOWED_TRANSITIONS.get(current_status, set())
+    if new_status not in allowed:
+        return _error(f"Cannot change status from '{current_status}' to '{new_status}'")
+
+    if new_status == "offered":
+        joined = _student_joined_elsewhere(app.student_id, exclude_app_id=app.id)
+        if joined:
+            return _error("Student has already accepted another offer and cannot receive new offers")
+
+    if new_status == "offer_withdrawn":
+        withdraw_reason = str(data.get("reason") or data.get("remarks") or "").strip()
+        if len(withdraw_reason) < 5:
+            return _error("A withdrawal reason is required (minimum 5 characters)")
+        app.remarks = withdraw_reason
 
     app.status = new_status
 
@@ -432,15 +519,14 @@ def update_application_status(app_id):
         message = str(data.get("offer_message") or "").strip()
         if message:
             app.remarks = message
-    if "remarks" in data:
+    if "remarks" in data and new_status != "offer_withdrawn":
         app.remarks = data["remarks"]
 
-    db.session.commit()
     db.session.add(Notification(
         user_id=app.student.user_id,
         title="Application updated",
         message=f"Your application for '{app.drive.title}' is now '{new_status}'.",
-        type="info" if new_status in ("applied", "waiting") else ("success" if new_status == "selected" else ("danger" if new_status == "rejected" else "warning")),
+        type=_notification_type_for_status(new_status),
     ))
     log_audit(
         actor_user_id=_actor_user_id(),
@@ -467,6 +553,14 @@ def send_offer_letter(app_id):
     data = request.get_json(silent=True) or {}
     offer_link = str(data.get("offer_letter_url") or "").strip()
     offer_message = str(data.get("message") or "").strip()
+
+    current_status = _normalized_status(app.status)
+    if current_status not in ("interview", "interview_accepted"):
+        return _error("Offer letter can be sent only after interview stage")
+
+    joined = _student_joined_elsewhere(app.student_id, exclude_app_id=app.id)
+    if joined:
+        return _error("Student has already accepted another offer and cannot receive new offers")
 
     if not offer_link:
         return _error("offer_letter_url is required")
@@ -534,7 +628,7 @@ def bulk_update_applications(drive_id):
     app_ids    = data.get("application_ids", [])
     new_status = data.get("status", "").strip()
 
-    valid_statuses = ("shortlisted", "waiting", "offered", "hired", "selected", "rejected", "offer_declined")
+    valid_statuses = ("accepted", "interview", "offered", "rejected")
     if new_status not in valid_statuses:
         return _error(f"Status must be one of: {', '.join(valid_statuses)}")
 
@@ -545,14 +639,22 @@ def bulk_update_applications(drive_id):
     for app_id in app_ids:
         app = Application.query.get(app_id)
         if app and app.drive_id == drive_id:
-            if new_status == "hired" and app.status not in ("offered", "selected"):
+            current_status = _normalized_status(app.status)
+            allowed = ALLOWED_TRANSITIONS.get(current_status, set())
+            if new_status not in allowed:
                 continue
+
+            if new_status == "offered":
+                joined = _student_joined_elsewhere(app.student_id, exclude_app_id=app.id)
+                if joined:
+                    continue
+
             app.status = new_status
             db.session.add(Notification(
                 user_id=app.student.user_id,
                 title="Application updated",
                 message=f"Your application for '{app.drive.title}' is now '{new_status}'.",
-                type="info" if new_status in ("applied", "waiting") else ("success" if new_status == "selected" else ("danger" if new_status == "rejected" else "warning")),
+                type=_notification_type_for_status(new_status),
             ))
             updated += 1
 
@@ -583,7 +685,7 @@ def placement_history():
         .join(PlacementDrive)
         .filter(
             PlacementDrive.company_id == company.id,
-            Application.status.in_(["selected", "hired"])
+            Application.status == "joined"
         )
         .order_by(Application.updated_at.desc())
         .all()

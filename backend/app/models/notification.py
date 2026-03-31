@@ -1,5 +1,6 @@
 from datetime import datetime
 from app.extensions import db
+from app.utils.datetime_utils import to_ist_iso
 
 
 class Notification(db.Model):
@@ -27,7 +28,7 @@ class Notification(db.Model):
             "type": self.type,
             "is_read": self.is_read,
             "meta_json": self.meta_json,
-            "created_at": self.created_at.isoformat(),
+            "created_at": to_ist_iso(self.created_at),
         }
 
     def __repr__(self):

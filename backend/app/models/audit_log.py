@@ -1,5 +1,6 @@
 from datetime import datetime
 from app.extensions import db
+from app.utils.datetime_utils import to_ist_iso
 
 
 class AuditLog(db.Model):
@@ -26,7 +27,7 @@ class AuditLog(db.Model):
             "entity_id": self.entity_id,
             "details_json": self.details_json,
             "ip_address": self.ip_address,
-            "created_at": self.created_at.isoformat(),
+            "created_at": to_ist_iso(self.created_at),
         }
 
     def __repr__(self):

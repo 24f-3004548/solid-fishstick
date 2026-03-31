@@ -1,18 +1,52 @@
 const StudentDashboard = {
+  props: {
+    section: {
+      type: String,
+      default: "overview",
+    },
+  },
   template: `
-  <div class="container py-4">
+  <div class="portal-page py-4 role-shell">
 
-    <!-- Header -->
-    <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
-      <div>
-        <h2 class="mb-0">Welcome, {{ student.full_name || '...' }}</h2>
-        <p class="text-muted mb-0" style="font-size:.9rem">
-          {{ student.branch }} · Year {{ student.year }} · CGPA {{ student.cgpa }}
-        </p>
+    <aside class="role-sidebar pp-card" role="navigation" aria-label="Student navigation menu">
+      <div class="role-sidebar-head">
+        <div class="portal-subtitle">Student</div>
+        <h6>Navigation</h6>
       </div>
-      <div class="d-flex gap-2">
-        <button class="btn btn-sm btn-outline-secondary" @click="activeTab='profile'">
+      <nav class="role-sidebar-nav">
+        <button
+          v-for="tab in tabs"
+          :key="'student_sb_' + tab.key"
+          type="button"
+          :class="['role-sidebar-link', { active: activeTab === tab.key }]"
+          :aria-current="activeTab === tab.key ? 'page' : false"
+          :aria-label="tab.label"
+          @click="goToTab(tab.key)">
+          <i :class="tab.icon" aria-hidden="true"></i>
+          <span>{{ tab.label }}</span>
+        </button>
+      </nav>
+    </aside>
+
+    <div class="role-main">
+
+    <div class="portal-hero flex-wrap">
+      <div>
+        <div class="portal-subtitle">Student Command Center</div>
+        <h2 class="mb-0">Welcome back, {{ student.full_name || 'Student' }}</h2>
+        <p>{{ student.branch || 'Branch' }} · Year {{ student.year || '—' }} · CGPA {{ student.cgpa || '—' }}</p>
+      </div>
+      <div class="d-flex gap-2 flex-wrap align-items-center">
+        <button class="btn btn-sm btn-outline-secondary" @click="goToTab('profile')">
           <i class="bi bi-person-gear me-1"></i>Profile
+        </button>
+        <button
+          class="btn btn-sm btn-outline-success student-resume-chip"
+          @click="goToTab('profile')"
+          :title="student.resume_path ? student.resume_path : 'No resume uploaded yet'"
+        >
+          <i class="bi bi-file-earmark-pdf-fill me-1"></i>
+          {{ student.resume_path ? ('Active Resume: ' + activeResumeName) : 'Active Resume: Not uploaded' }}
         </button>
         <button class="btn btn-sm btn-outline-primary" @click="exportCSV" :disabled="exporting">
           <span v-if="exporting" class="spinner-border spinner-border-sm me-1"></span>
@@ -21,102 +55,103 @@ const StudentDashboard = {
       </div>
     </div>
 
-    <!-- Tabs -->
-    <ul class="nav nav-pills mb-4" style="gap:.5rem">
-      <li class="nav-item" v-for="t in tabs" :key="t.key">
-        <button :class="['btn btn-sm', activeTab===t.key ? 'btn-primary' : 'btn-outline-secondary']"
-          @click="activeTab=t.key">
-          <i :class="t.icon+' me-1'"></i>{{ t.label }}
-          <span v-if="t.key==='drives' && stats.eligible_drives > 0"
-            class="badge bg-danger ms-1" style="font-size:.65rem">
-            {{ stats.eligible_drives }}
-          </span>
-        </button>
-      </li>
-    </ul>
-
     <!-- ── TAB: Overview ─────────────────────────────────────── -->
     <div v-if="activeTab==='overview'">
-
-      <!-- Stats -->
-      <div class="row g-3 mb-4">
-        <div class="col-6 col-md-3" v-for="s in statCards" :key="s.label">
-          <div class="stat-card">
-            <div class="stat-icon" :style="{background: s.bg}">
-              <i :class="s.icon" :style="{color: s.color}"></i>
+      <div class="student-overview-layout">
+        <div class="pp-card mb-3">
+          <div class="student-kpi-grid">
+            <div class="student-kpi-card applied">
+              <div class="student-kpi-label">Applied</div>
+              <div class="student-kpi-value">{{ stats.total_applied || 0 }}</div>
             </div>
-            <div>
-              <div class="stat-value">{{ s.value }}</div>
-              <div class="stat-label">{{ s.label }}</div>
+            <div class="student-kpi-card selected">
+              <div class="student-kpi-label">Joined</div>
+              <div class="student-kpi-value">{{ stats.joined || 0 }}</div>
+            </div>
+            <div class="student-kpi-card shortlisted">
+              <div class="student-kpi-label">Accepted</div>
+              <div class="student-kpi-value">{{ stats.accepted || 0 }}</div>
+            </div>
+            <div class="student-kpi-card waiting">
+              <div class="student-kpi-label">Interview</div>
+              <div class="student-kpi-value">{{ stats.interview || 0 }}</div>
+            </div>
+          </div>
+
+          <div class="student-funnel-wrap mt-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h6 class="mb-0 fw-bold">Placement funnel</h6>
+              <small class="text-muted">{{ conversionPercent }}% conversion</small>
+            </div>
+            <div class="student-funnel-bar">
+              <div
+                v-for="segment in funnelSegments"
+                :key="'funnel_'+segment.key"
+                class="student-funnel-segment"
+                :style="{ width: segment.width + '%', background: segment.color }"
+              ></div>
+            </div>
+            <div class="student-funnel-legend">
+              <span v-for="segment in funnelSegments" :key="'legend_'+segment.key">
+                <i class="bi bi-circle-fill" :style="{ color: segment.color }"></i>
+                {{ segment.label }} ({{ segment.value }})
+              </span>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- Eligible drives preview -->
-      <div class="pp-card mb-4">
-        <div class="d-flex align-items-center justify-content-between mb-3">
-          <h6 class="mb-0 fw-600">Open drives for you</h6>
-          <button class="btn btn-sm btn-outline-primary" @click="activeTab='drives'">
-            View all
-          </button>
-        </div>
-        <div v-if="loadingDash" class="pp-spinner"><div class="spinner-border spinner-border-sm"></div></div>
-        <div v-else-if="eligibleDrives.length===0" class="empty-state">
-          <i class="bi bi-briefcase"></i>
-          No open drives matching your profile right now
-        </div>
-        <div v-else class="d-flex flex-column gap-2">
-          <div v-for="d in eligibleDrives.slice(0,4)" :key="d.id" class="drive-card">
-            <div class="d-flex align-items-center gap-3">
-              <div class="company-logo">{{ d.company_name?.charAt(0) }}</div>
-              <div class="flex-grow-1 min-width-0">
-                <div class="fw-500">{{ d.title }}</div>
-                <div class="text-muted" style="font-size:.82rem">
-                  {{ d.company_name }} · {{ d.location || 'Remote' }}
-                  <span v-if="d.salary_lpa" class="ms-2">₹{{ d.salary_lpa }} LPA</span>
+        <div class="student-overview-bottom">
+          <div class="pp-card">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h6 class="mb-0 fw-bold">Recent applications</h6>
+              <button class="btn btn-sm btn-outline-secondary" @click="goToTab('applications')">View all</button>
+            </div>
+            <div v-if="recentApps.length" class="d-flex flex-column gap-2">
+              <div v-for="a in recentApps.slice(0,4)" :key="'recent_wire_'+a.id" class="student-app-row">
+                <div>
+                  <div class="fw-semibold">{{ a.company_name }}</div>
+                  <div class="text-muted" style="font-size:.8rem;">{{ a.drive_title }}</div>
+                </div>
+                <span :class="'status-badge '+a.status">{{ a.status }}</span>
+              </div>
+            </div>
+            <div v-else class="empty-state" style="padding:1.2rem .6rem;">
+              <i class="bi bi-file-earmark-text"></i>No applications yet
+            </div>
+          </div>
+
+          <div class="d-flex flex-column gap-3">
+            <div class="pp-card">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0 fw-bold">Open for you</h6>
+                <span class="badge rounded-pill bg-light text-primary">{{ eligibleDrives.length }} drives</span>
+              </div>
+              <div v-if="eligibleDrives.length" class="d-flex flex-column gap-2">
+                <div v-for="d in eligibleDrives.slice(0,2)" :key="'open_for_you_'+d.id" class="student-drive-row">
+                  <div>
+                    <div class="fw-semibold">{{ d.company_name }}</div>
+                    <div class="text-muted" style="font-size:.78rem;">{{ d.title }} · Due {{ formatDate(d.application_deadline) }}</div>
+                  </div>
+                  <div class="d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-primary" @click="openDriveReview(d)">Review</button>
+                  </div>
                 </div>
               </div>
-              <div class="d-flex flex-column align-items-end gap-1">
-                <span class="status-badge approved">open</span>
-                <span style="font-size:.75rem;color:var(--text-muted)">
-                  Due {{ formatDate(d.application_deadline) }}
-                </span>
+              <div v-else class="empty-state" style="padding:1rem .4rem;">
+                <i class="bi bi-briefcase"></i>No new eligible drives
               </div>
-              <button class="btn btn-sm btn-primary" @click="applyDrive(d)"
-                :disabled="d.already_applied || applying===d.id">
-                <span v-if="applying===d.id" class="spinner-border spinner-border-sm"></span>
-                <span v-else>{{ d.already_applied ? 'Applied' : 'Apply' }}</span>
-              </button>
+            </div>
+
+            <div class="pp-card">
+              <h6 class="fw-bold mb-2">Quick Actions</h6>
+              <div class="d-grid gap-2">
+                <button class="btn btn-outline-secondary text-start" @click="goToTab('profile')"><i class="bi bi-file-earmark-pdf me-2"></i>Resume Builder</button>
+                <button class="btn btn-outline-secondary text-start"><i class="bi bi-mortarboard me-2"></i>Mock Interview</button>
+                <button class="btn btn-outline-secondary text-start"><i class="bi bi-journal-text me-2"></i>Past Papers</button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-
-      <!-- Recent applications -->
-      <div class="pp-card">
-        <div class="d-flex align-items-center justify-content-between mb-3">
-          <h6 class="mb-0 fw-600">Recent applications</h6>
-          <button class="btn btn-sm btn-outline-primary" @click="activeTab='applications'">View all</button>
-        </div>
-        <div v-if="recentApps.length===0" class="empty-state">
-          <i class="bi bi-file-earmark-text"></i>No applications yet
-        </div>
-        <table v-else class="pp-table">
-          <thead>
-            <tr>
-              <th>Company</th><th>Drive</th><th>Applied</th><th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="a in recentApps" :key="a.id">
-              <td>{{ a.company_name }}</td>
-              <td>{{ a.drive_title }}</td>
-              <td>{{ formatDate(a.applied_at) }}</td>
-              <td><span :class="'status-badge '+a.status">{{ a.status }}</span></td>
-            </tr>
-          </tbody>
-        </table>
       </div>
     </div>
 
@@ -168,6 +203,9 @@ const StudentDashboard = {
                 <span class="fw-500">{{ d.title }}</span>
                 <span v-if="d.job_type" class="badge bg-light text-dark border"
                   style="font-size:.72rem">{{ d.job_type }}</span>
+                <span v-if="d.is_eligible" :class="'status-badge ' + (d.already_applied ? 'approved' : 'waiting')">
+                  {{ d.already_applied ? 'Applied' : 'Not applied' }}
+                </span>
                 <span v-if="!d.is_eligible" class="badge bg-warning text-dark"
                   style="font-size:.72rem">
                   <i class="bi bi-exclamation-triangle me-1"></i>Not eligible
@@ -195,18 +233,107 @@ const StudentDashboard = {
               </div>
             </div>
             <div class="flex-shrink-0">
-              <button v-if="d.already_applied" class="btn btn-sm btn-outline-success" disabled>
-                <i class="bi bi-check-circle me-1"></i>Applied
-              </button>
-              <button v-else-if="d.is_eligible"
-                class="btn btn-sm btn-primary" @click="applyDrive(d)"
-                :disabled="applying===d.id">
-                <span v-if="applying===d.id" class="spinner-border spinner-border-sm"></span>
-                <span v-else>Apply now</span>
-              </button>
-              <button v-else class="btn btn-sm btn-outline-secondary" disabled>Not eligible</button>
+              <div class="d-flex gap-2 flex-wrap">
+                <button class="btn btn-sm btn-outline-primary" @click="openDriveReview(d)">Review</button>
+              </div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Drive review modal ─────────────────────────────── -->
+    <div v-if="driveReviewModal.show"
+      style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1050;
+             display:flex;align-items:center;justify-content:center;padding:1rem;overflow-y:auto"
+      @click.self="closeDriveReview">
+      <div class="pp-card" style="width:100%;max-width:720px;margin:auto;">
+        <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+          <div>
+            <h6 class="fw-600 mb-1">{{ driveReviewModal.item.title || 'Drive Review' }}</h6>
+            <div class="text-muted" style="font-size:.86rem;">{{ driveReviewModal.item.company_name || 'Company' }}</div>
+          </div>
+          <div class="d-flex gap-2 flex-wrap justify-content-end">
+            <span v-if="driveReviewModal.item.id" :class="'status-badge ' + (driveReviewModal.item.is_eligible ? 'approved' : 'waiting')">
+              {{ driveReviewModal.item.is_eligible ? 'Eligible' : 'Not eligible' }}
+            </span>
+            <span :class="'status-badge ' + (driveReviewModal.item.already_applied ? 'approved' : 'waiting')">
+              {{ driveReviewModal.item.already_applied ? 'Applied' : 'Not applied' }}
+            </span>
+          </div>
+        </div>
+
+        <div v-if="driveReviewModal.loading" class="pp-spinner"><div class="spinner-border spinner-border-sm"></div></div>
+        <div v-else class="row g-3">
+          <div class="col-md-6">
+            <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Job Type</div>
+            <div class="fw-500">{{ driveReviewModal.item.job_type || '—' }}</div>
+          </div>
+          <div class="col-md-6">
+            <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Location</div>
+            <div class="fw-500">{{ driveReviewModal.item.location || '—' }}</div>
+          </div>
+          <div class="col-md-6">
+            <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Salary</div>
+            <div class="fw-500">{{ driveReviewModal.item.salary_lpa ? ('₹' + driveReviewModal.item.salary_lpa + ' LPA') : '—' }}</div>
+          </div>
+          <div class="col-md-6">
+            <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Min CGPA</div>
+            <div class="fw-500">{{ driveReviewModal.item.min_cgpa ?? '—' }}</div>
+          </div>
+          <div class="col-md-6">
+            <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Eligible Branches</div>
+            <div class="fw-500">
+              {{ Array.isArray(driveReviewModal.item.eligible_branches) && driveReviewModal.item.eligible_branches.length
+                ? driveReviewModal.item.eligible_branches.join(', ')
+                : 'All branches' }}
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Apply Deadline</div>
+            <div class="fw-500">{{ formatDate(driveReviewModal.item.application_deadline) }}</div>
+          </div>
+          <div class="col-12" v-if="driveReviewModal.item.ineligible_reason">
+            <div class="pp-alert alert-warning mb-0">
+              <i class="bi bi-exclamation-triangle me-2"></i>{{ driveReviewModal.item.ineligible_reason }}
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Description</div>
+            <div class="portal-panel mt-1" style="white-space:pre-wrap;font-size:.88rem;">{{ driveReviewModal.item.description || '—' }}</div>
+          </div>
+        </div>
+
+        <div class="d-flex gap-2 justify-content-end mt-4">
+          <button class="btn btn-outline-secondary" @click="closeDriveReview">Close</button>
+          <button
+            v-if="driveReviewModal.item.already_applied && (!resolveApplicationStatus(driveReviewModal.item) || resolveApplicationStatus(driveReviewModal.item) === 'applied')"
+            class="btn btn-outline-danger"
+            @click="unapplyDrive(driveReviewModal.item)"
+            :disabled="applying===driveReviewModal.item.id">
+            <span v-if="applying===driveReviewModal.item.id" class="spinner-border spinner-border-sm me-2"></span>
+            Withdraw
+          </button>
+          <button
+            v-else-if="driveReviewModal.item.already_applied"
+            class="btn btn-outline-success"
+            disabled>
+            <i class="bi bi-check-circle me-1"></i>Applied
+          </button>
+          <button
+            v-else-if="driveReviewModal.item.is_eligible"
+            class="btn btn-primary"
+            @click="applyDrive(driveReviewModal.item)"
+            :disabled="applying===driveReviewModal.item.id || hasJoinedOffer">
+            <span v-if="applying===driveReviewModal.item.id" class="spinner-border spinner-border-sm me-2"></span>
+            {{ hasJoinedOffer ? 'Joined elsewhere' : 'Apply' }}
+          </button>
+          <button
+            v-else
+            class="btn btn-outline-secondary"
+            disabled>
+            Not eligible
+          </button>
         </div>
       </div>
     </div>
@@ -216,81 +343,115 @@ const StudentDashboard = {
       <div class="pp-card mb-3">
         <div class="row g-2 align-items-end">
           <div class="col-md-4">
-            <label class="form-label">Filter by status</label>
-            <select v-model="appStatusFilter" class="form-select" @change="fetchApplications">
+            <label class="form-label" for="appStatusFilter">Filter by status</label>
+            <select v-model="appStatusFilter" id="appStatusFilter" class="form-select" aria-label="Filter applications by status" @change="fetchApplications">
               <option value="">All statuses</option>
               <option v-for="s in appStatuses" :key="s" :value="s">{{ s }}</option>
             </select>
+          </div>
+          <div class="col-md-8">
+            <label class="form-label" for="appSearchInput">Search applications</label>
+            <div class="input-group">
+              <span class="input-group-text" aria-hidden="true"><i class="bi bi-search"></i></span>
+              <input id="appSearchInput" v-model="appSearch" class="form-control" placeholder="Company, job title..."
+                aria-label="Search applications by company or job title"
+                @input="debouncedAppSearch"/>
+            </div>
           </div>
         </div>
       </div>
 
       <div v-if="loadingApps" class="pp-spinner">
-        <div class="spinner-border text-primary"></div>
+        <SkeletonLoader type="list" :rows="3" />
       </div>
 
-      <div v-else-if="myApplications.length===0" class="empty-state pp-card">
+      <div v-else-if="filteredApplications.length===0" class="empty-state pp-card" role="status" aria-live="polite">
         <i class="bi bi-file-earmark-text"></i>
-        <p>No applications yet. Browse drives and apply!</p>
-        <button class="btn btn-primary btn-sm" @click="activeTab='drives'">Browse drives</button>
+        <h6>No applications found</h6>
+        <p v-if="appSearch || appStatusFilter" style="font-size:.88rem;color:var(--hint)">Try adjusting your filters or search terms</p>
+        <p v-else style="font-size:.88rem;color:var(--hint)">Browse drives and apply to get started!</p>
+        <button class="btn btn-primary btn-sm" aria-label="Browse all drives to apply" @click="goToTab('drives')">Browse drives</button>
       </div>
 
-      <div v-else class="d-flex flex-column gap-3">
-        <div v-for="a in myApplications" :key="a.id" class="pp-card">
-          <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
-            <div>
-              <div class="fw-500">{{ a.drive_title }}</div>
-              <div class="text-muted" style="font-size:.85rem">{{ a.company_name }}</div>
-              <div class="mt-2 d-flex flex-wrap gap-2">
-                <span :class="'status-badge '+a.status">{{ a.status }}</span>
-                <span class="text-muted" style="font-size:.8rem">
-                  Applied {{ formatDate(a.applied_at) }}
-                </span>
+      <template v-else>
+        <div class="d-flex flex-column gap-3 mb-4">
+          <div v-for="a in paginatedApps" :key="a.id" class="pp-card">
+            <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
+              <div class="flex-grow-1">
+                <div class="fw-500">{{ a.drive_title }}</div>
+                <div class="text-muted" style="font-size:.85rem">{{ a.company_name }}</div>
+                <div class="mt-2 d-flex flex-wrap gap-2">
+                  <span :class="'status-badge '+a.status">{{ a.status }}</span>
+                  <span class="text-muted" style="font-size:.8rem">
+                    Applied {{ formatDate(a.applied_at) }}
+                  </span>
+                </div>
+                <div v-if="a.interview_date" class="mt-2 text-info" style="font-size:.82rem">
+                  <i class="bi bi-camera-video me-1"></i>
+                  Interview: {{ formatDate(a.interview_date) }} ({{ a.interview_type }})
+                </div>
+                <div v-if="a.remarks" class="mt-1 text-muted" style="font-size:.82rem">
+                  <i class="bi bi-chat-left-text me-1"></i>{{ a.remarks }}
+                </div>
               </div>
-              <div v-if="a.interview_date" class="mt-2 text-info" style="font-size:.82rem">
-                <i class="bi bi-camera-video me-1"></i>
-                Interview: {{ formatDate(a.interview_date) }} ({{ a.interview_type }})
+              <div class="d-flex flex-column gap-2 align-items-stretch">
+                <button
+                  v-if="a.status==='interview'"
+                  class="btn btn-sm btn-outline-primary"
+                  @click="respondToInterview(a)"
+                >
+                  <i class="bi bi-check2-circle me-1" aria-hidden="true"></i>Accept interview
+                </button>
+                <button
+                  v-if="a.status==='offered'"
+                  class="btn btn-sm btn-outline-primary"
+                  :aria-label="'View offer letter for ' + a.drive_title + ' at ' + a.company_name"
+                  @click="viewOffer(a)"
+                >
+                  <i class="bi bi-file-earmark-text me-1" aria-hidden="true"></i>View offer
+                </button>
+                <button
+                  v-if="a.status==='offered'"
+                  class="btn btn-sm btn-success"
+                  :aria-label="'Accept offer from ' + a.company_name + ' for ' + a.drive_title"
+                  @click="respondToOffer(a)"
+                >
+                  <i class="bi bi-check2-circle me-1" aria-hidden="true"></i>Accept offer
+                </button>
+                <button v-if="a.status==='applied'" class="btn btn-sm btn-outline-danger"
+                  :aria-label="'Withdraw application for ' + a.drive_title + ' at ' + a.company_name"
+                  @click="withdrawApp(a)">
+                  <i class="bi bi-x-circle me-1" aria-hidden="true"></i>Withdraw
+                </button>
               </div>
-              <div v-if="a.remarks" class="mt-1 text-muted" style="font-size:.82rem">
-                <i class="bi bi-chat-left-text me-1"></i>{{ a.remarks }}
-              </div>
-            </div>
-            <div class="d-flex flex-column gap-2 align-items-stretch">
-              <button
-                v-if="a.status==='offered'"
-                class="btn btn-sm btn-outline-primary"
-                @click="viewOffer(a)"
-              >
-                <i class="bi bi-file-earmark-text me-1"></i>View offer
-              </button>
-              <button
-                v-if="a.status==='offered'"
-                class="btn btn-sm btn-success"
-                @click="respondToOffer(a, 'accept')"
-              >
-                <i class="bi bi-check2-circle me-1"></i>Accept offer
-              </button>
-              <button
-                v-if="a.status==='offered'"
-                class="btn btn-sm btn-outline-danger"
-                @click="respondToOffer(a, 'reject')"
-              >
-                <i class="bi bi-x-circle me-1"></i>Decline offer
-              </button>
-              <button v-if="a.status==='applied'" class="btn btn-sm btn-outline-danger"
-                @click="withdrawApp(a)">
-                <i class="bi bi-x-circle me-1"></i>Withdraw
-              </button>
             </div>
           </div>
         </div>
-      </div>
+
+        <!-- Pagination -->
+        <div v-if="appsPagination.totalPages > 1" class="pagination-wrapper" role="navigation" aria-label="Applications pagination">
+          <div class="pagination-info text-muted" style="font-size:.82rem;" aria-live="polite" aria-atomic="true">
+            Showing {{ appsPagination.startItem }}-{{ appsPagination.endItem }} of {{ appsPagination.total }} applications
+          </div>
+          <div class="d-flex gap-2">
+            <button @click="appCurrentPage = Math.max(1, appCurrentPage - 1)" :disabled="appCurrentPage === 1"
+              class="btn btn-sm btn-outline-secondary" aria-label="Previous page">
+              <i class="bi bi-chevron-left" aria-hidden="true"></i>
+            </button>
+            <span class="btn btn-sm btn-outline-secondary disabled" aria-current="page">{{ appCurrentPage }} / {{ appsPagination.totalPages }}</span>
+            <button @click="appCurrentPage = Math.min(appsPagination.totalPages, appCurrentPage + 1)"
+              :disabled="appCurrentPage === appsPagination.totalPages" class="btn btn-sm btn-outline-secondary" aria-label="Next page">
+              <i class="bi bi-chevron-right" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- ── TAB: History ──────────────────────────────────────── -->
     <div v-if="activeTab==='history'">
       <div v-if="loadingHistory" class="pp-spinner">
-        <div class="spinner-border text-primary"></div>
+        <SkeletonLoader type="table" :rows="5" />
       </div>
       <div v-else>
         <!-- Summary pills -->
@@ -303,28 +464,44 @@ const StudentDashboard = {
         </div>
 
         <div v-if="history.length===0" class="empty-state pp-card">
-          <i class="bi bi-clock-history"></i>No placement history yet
+          <i class="bi bi-clock-history"></i>
+          <h6>No placement history yet</h6>
+          <p style="font-size:.88rem;color:var(--hint)">Your application history will appear here once you apply to drives.</p>
         </div>
 
         <div v-else class="pp-card">
-          <table class="pp-table">
-            <thead>
-              <tr>
-                <th>#</th><th>Company</th><th>Drive</th>
-                <th>Interview</th><th>Applied</th><th>Result</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(a,i) in history" :key="a.id">
-                <td class="text-muted">{{ i+1 }}</td>
-                <td>{{ a.company_name }}</td>
-                <td>{{ a.drive_title }}</td>
-                <td>{{ a.interview_type || '—' }}</td>
-                <td>{{ formatDate(a.applied_at) }}</td>
-                <td><span :class="'status-badge '+a.status">{{ a.status }}</span></td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="table-responsive">
+            <table class="pp-table" role="table" aria-label="Application history table">
+              <thead>
+                <tr>
+                  <th class="sortable" @click="setSortBy('#')" style="width:0;cursor:auto;" scope="col">#</th>
+                  <th class="sortable" @click="setSortBy('company_name')" scope="col">
+                    Company <span class="sort-indicator" v-if="historySortBy==='company_name'" aria-hidden="true"><i :class="'bi bi-arrow-'+(historySortDir==='asc'?'up':'down')"></i></span>
+                  </th>
+                  <th class="sortable" @click="setSortBy('drive_title')" scope="col">
+                    Drive <span class="sort-indicator" v-if="historySortBy==='drive_title'" aria-hidden="true"><i :class="'bi bi-arrow-'+(historySortDir==='asc'?'up':'down')"></i></span>
+                  </th>
+                  <th class="sortable" @click="setSortBy('interview_type')" scope="col">Interview</th>
+                  <th class="sortable" @click="setSortBy('applied_at')" scope="col">
+                    Applied <span class="sort-indicator" v-if="historySortBy==='applied_at'" aria-hidden="true"><i :class="'bi bi-arrow-'+(historySortDir==='asc'?'up':'down')"></i></span>
+                  </th>
+                  <th class="sortable" @click="setSortBy('status')" scope="col">
+                    Result <span class="sort-indicator" v-if="historySortBy==='status'" aria-hidden="true"><i :class="'bi bi-arrow-'+(historySortDir==='asc'?'up':'down')"></i></span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(a,i) in sortedHistory" :key="a.id">
+                  <td class="text-muted" style="width:0;">{{ i+1 }}</td>
+                  <td>{{ a.company_name }}</td>
+                  <td>{{ a.drive_title }}</td>
+                  <td>{{ a.interview_type || '—' }}</td>
+                  <td>{{ formatDate(a.applied_at) }}</td>
+                  <td><span :class="'status-badge '+a.status">{{ a.status }}</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
@@ -380,10 +557,6 @@ const StudentDashboard = {
             <h6 class="fw-600 mb-3">Academic info</h6>
             <div class="row g-2" style="font-size:.9rem">
               <div class="col-6">
-                <div class="text-muted">Roll number</div>
-                <div class="fw-500">{{ student.roll_number }}</div>
-              </div>
-              <div class="col-6">
                 <div class="text-muted">Branch</div>
                 <div class="fw-500">{{ student.branch }}</div>
               </div>
@@ -401,12 +574,13 @@ const StudentDashboard = {
       </div>
     </div>
 
+    </div>
   </div>
   `,
 
   data() {
     return {
-      activeTab: "overview",
+      activeTab: this.section || "overview",
       tabs: [
         { key: "overview",      label: "Overview",      icon: "bi bi-house" },
         { key: "drives",        label: "Browse drives", icon: "bi bi-briefcase" },
@@ -415,12 +589,13 @@ const StudentDashboard = {
         { key: "profile",       label: "Profile",       icon: "bi bi-person" },
       ],
       student:       {},
-      stats:         { total_applied: 0, shortlisted: 0, selected: 0, rejected: 0, eligible_drives: 0 },
+      stats:         { total_applied: 0, accepted: 0, interview: 0, joined: 0, rejected: 0, eligible_drives: 0 },
       eligibleDrives: [],
       recentApps:    [],
       allDrives:     [],
       myApplications:[],
       history:       [],
+      hasJoinedOffer: false,
       loadingDash:   true,
       loadingDrives: false,
       loadingApps:   false,
@@ -431,24 +606,52 @@ const StudentDashboard = {
       driveJobType:  "",
       eligibleOnly:  false,
       appStatusFilter: "",
-      appStatuses:   ["applied","shortlisted","waiting","offered","hired","selected","offer_declined","rejected"],
+      appSearch:     "",
+      appStatuses:   ["applied","accepted","interview","interview_accepted","offered","joined","offer_withdrawn","void_joined_elsewhere","rejected"],
+      appCurrentPage: 1,
+      appPageSize:   10,
       profileForm:   { full_name: "", phone: "", dob: "" },
       savingProfile: false,
       resumeFile:    null,
       uploadingResume: false,
+      driveReviewModal: { show: false, item: {}, loading: false },
       alert:         { msg: "", type: "success" },
       _searchTimer:  null,
+      _appSearchTimer: null,
       _refreshTimer: null,
       _onWindowFocus: null,
+      historySortBy: 'applied_at',
+      historySortDir: 'desc',
     };
   },
 
   computed: {
+    conversionPercent() {
+      const total = Number(this.stats.total_applied || 0);
+      if (!total) return 0;
+      return Math.round((Number(this.stats.joined || 0) / total) * 100);
+    },
+    funnelSegments() {
+      const rawSegments = [
+        { key: "applied", label: "Applied", value: Number(this.stats.total_applied || 0), color: "#1e5da9" },
+        { key: "accepted", label: "Accepted", value: Number(this.stats.accepted || 0), color: "#e09a27" },
+        { key: "joined", label: "Joined", value: Number(this.stats.joined || 0), color: "#2f9d6c" },
+        { key: "interview", label: "Interview", value: Number(this.stats.interview || 0), color: "#9ca3af" },
+      ];
+      const total = rawSegments.reduce((sum, item) => sum + item.value, 0);
+      if (!total) {
+        return rawSegments.map((item) => ({ ...item, width: 25 }));
+      }
+      return rawSegments.map((item) => ({
+        ...item,
+        width: Math.max((item.value / total) * 100, item.value > 0 ? 8 : 0),
+      }));
+    },
     statCards() {
       return [
         { label: "Applied",     value: this.stats.total_applied, icon: "bi bi-send-fill",      bg: "#eff6ff", color: "#1d4ed8" },
-        { label: "Shortlisted", value: this.stats.shortlisted,   icon: "bi bi-star-fill",      bg: "#fef3c7", color: "#92400e" },
-        { label: "Selected",    value: this.stats.selected,      icon: "bi bi-trophy-fill",    bg: "#dcfce7", color: "#166534" },
+        { label: "Accepted",    value: this.stats.accepted,      icon: "bi bi-star-fill",      bg: "#fef3c7", color: "#92400e" },
+        { label: "Joined",      value: this.stats.joined,        icon: "bi bi-trophy-fill",    bg: "#dcfce7", color: "#166534" },
         { label: "Rejected",    value: this.stats.rejected,      icon: "bi bi-x-circle-fill",  bg: "#fee2e2", color: "#991b1b" },
       ];
     },
@@ -457,16 +660,81 @@ const StudentDashboard = {
       return [
         { key: "applied",     label: "Total applied",  value: h.length },
         { key: "offered",     label: "Offered",        value: h.filter(a=>a.status==="offered").length },
-        { key: "hired",       label: "Hired",          value: h.filter(a=>a.status==="hired").length },
-        { key: "offer_declined", label: "Declined",    value: h.filter(a=>a.status==="offer_declined").length },
-        { key: "selected",    label: "Selected",       value: h.filter(a=>a.status==="selected").length },
-        { key: "shortlisted", label: "Shortlisted",    value: h.filter(a=>a.status==="shortlisted").length },
+        { key: "joined",      label: "Joined",         value: h.filter(a=>a.status==="joined").length },
+        { key: "void_joined_elsewhere", label: "Voided", value: h.filter(a=>a.status==="void_joined_elsewhere").length },
+        { key: "accepted",    label: "Accepted",       value: h.filter(a=>a.status==="accepted").length },
+        { key: "interview",   label: "Interview",      value: h.filter(a=>a.status==="interview").length },
         { key: "rejected",    label: "Rejected",       value: h.filter(a=>a.status==="rejected").length },
       ];
-    }
+    },
+    filteredApplications() {
+      let apps = this.myApplications;
+
+      if (this.appSearch) {
+        const q = this.appSearch.toLowerCase();
+        apps = apps.filter(a =>
+          a.company_name?.toLowerCase().includes(q) ||
+          a.drive_title?.toLowerCase().includes(q)
+        );
+      }
+
+      return apps;
+    },
+    paginatedApps() {
+      const start = (this.appCurrentPage - 1) * this.appPageSize;
+      const end = start + this.appPageSize;
+      return this.filteredApplications.slice(start, end);
+    },
+    appsPagination() {
+      const total = this.filteredApplications.length;
+      const totalPages = Math.ceil(total / this.appPageSize);
+      const start = (this.appCurrentPage - 1) * this.appPageSize + 1;
+      const end = Math.min(this.appCurrentPage * this.appPageSize, total);
+      return {
+        total,
+        totalPages,
+        startItem: total > 0 ? start : 0,
+        endItem: end,
+        hasNext: this.appCurrentPage < totalPages,
+        hasPrev: this.appCurrentPage > 1,
+      };
+    },
+    sortedHistory() {
+      if (!this.history || this.history.length === 0) return [];
+
+      let sorted = [...this.history];
+
+      if (this.historySortBy && this.historySortBy !== '#') {
+        sorted.sort((a, b) => {
+          const valA = a[this.historySortBy];
+          const valB = b[this.historySortBy];
+
+          if (valA == null) return 1;
+          if (valB == null) return -1;
+
+          if (typeof valA === 'string') {
+            const cmp = valA.localeCompare(valB);
+            return this.historySortDir === 'asc' ? cmp : -cmp;
+          }
+
+          return this.historySortDir === 'asc' ? valA - valB : valB - valA;
+        });
+      }
+
+      return sorted;
+    },
+    activeResumeName() {
+      if (!this.student?.resume_path) return "Not uploaded";
+      const path = String(this.student.resume_path);
+      const segments = path.split("/");
+      return segments[segments.length - 1] || path;
+    },
   },
 
   watch: {
+    section(next) {
+      this.activeTab = next || "overview";
+    },
     activeTab(tab) {
       if (tab === "drives")       this.fetchDrives();
       if (tab === "applications") this.fetchApplications();
@@ -483,11 +751,53 @@ const StudentDashboard = {
 
   beforeUnmount() {
     if (this._searchTimer) clearTimeout(this._searchTimer);
+    if (this._appSearchTimer) clearTimeout(this._appSearchTimer);
     if (this._refreshTimer) clearInterval(this._refreshTimer);
     if (this._onWindowFocus) window.removeEventListener("focus", this._onWindowFocus);
   },
 
   methods: {
+    routeForTab(tab) {
+      const map = {
+        overview: "/student/dashboard",
+        drives: "/student/drives",
+        applications: "/student/applications",
+        history: "/student/history",
+        profile: "/student/profile",
+      };
+      return map[tab] || "/student/dashboard";
+    },
+
+    goToTab(tab) {
+      const target = this.routeForTab(tab);
+      if (this.$route.path !== target) this.$router.push(target);
+    },
+
+    async openDriveReview(drive) {
+      if (!drive?.id) return;
+      this.driveReviewModal = { show: true, item: { ...drive }, loading: true };
+      try {
+        const { data } = await ApiService.studentDrive(drive.id);
+        const normalized = data.drive || { ...drive };
+        if (!normalized.application_status && normalized.application?.status) {
+          normalized.application_status = normalized.application.status;
+        }
+        if (!normalized.application_id && normalized.application?.id) {
+          normalized.application_id = normalized.application.id;
+        }
+        this.driveReviewModal.item = normalized;
+      } catch {
+        ppToast("Could not load full drive details", "warning");
+        this.driveReviewModal.item = { ...drive };
+      } finally {
+        this.driveReviewModal.loading = false;
+      }
+    },
+
+    closeDriveReview() {
+      this.driveReviewModal = { show: false, item: {}, loading: false };
+    },
+
     async refreshCurrentView(silent = false) {
       await this.fetchDashboard(silent);
       if (this.activeTab === "drives") await this.fetchDrives(silent);
@@ -501,14 +811,18 @@ const StudentDashboard = {
         const { data } = await ApiService.studentDashboard();
         this.student        = data.student;
         this.stats          = data.stats;
+        this.hasJoinedOffer = !!data.has_joined_offer;
         this.eligibleDrives = data.eligible_drives || [];
         this.recentApps     = data.recent_applications || [];
         this.stats.eligible_drives = this.eligibleDrives.length;
         this.profileForm.full_name = this.student.full_name;
         this.profileForm.phone     = this.student.phone || "";
         this.profileForm.dob       = this.student.dob   || "";
-      } catch {
-        if (!silent) this.showAlert("Failed to load dashboard", "danger");
+      } catch (error) {
+        if (!silent) {
+          ppToast("Failed to load dashboard", "danger");
+          console.error("Dashboard fetch error:", error);
+        }
       }
       finally  { this.loadingDash = false; }
     },
@@ -521,16 +835,14 @@ const StudentDashboard = {
         if (this.driveJobType) params.job_type      = this.driveJobType;
         if (this.eligibleOnly) params.eligible_only = "true";
         const { data } = await ApiService.studentDrives(params);
-        this.allDrives = data.drives;
-      } catch {
-        if (!silent) this.showAlert("Failed to load drives", "danger");
+        this.allDrives = (data.drives || []).filter((drive) => !drive.already_applied);
+      } catch (error) {
+        if (!silent) {
+          ppToast("Failed to load drives", "danger");
+          console.error("Drives fetch error:", error);
+        }
       }
       finally  { this.loadingDrives = false; }
-    },
-
-    debouncedSearch() {
-      clearTimeout(this._searchTimer);
-      this._searchTimer = setTimeout(() => this.fetchDrives(), 400);
     },
 
     async fetchApplications(silent = false) {
@@ -539,8 +851,12 @@ const StudentDashboard = {
         const params = this.appStatusFilter ? { status: this.appStatusFilter } : {};
         const { data } = await ApiService.studentApplications(params);
         this.myApplications = data.applications;
-      } catch {
-        if (!silent) this.showAlert("Failed to load applications", "danger");
+        this.appCurrentPage = 1;
+      } catch (error) {
+        if (!silent) {
+          ppToast("Failed to load applications", "danger");
+          console.error("Applications fetch error:", error);
+        }
       }
       finally  { this.loadingApps = false; }
     },
@@ -550,66 +866,126 @@ const StudentDashboard = {
       try {
         const { data } = await ApiService.studentHistory();
         this.history = data.history;
-      } catch {
-        if (!silent) this.showAlert("Failed to load history", "danger");
+      } catch (error) {
+        if (!silent) {
+          ppToast("Failed to load history", "danger");
+          console.error("History fetch error:", error);
+        }
       }
       finally  { this.loadingHistory = false; }
     },
 
     async applyDrive(drive) {
+      if (this.hasJoinedOffer) {
+        ppToast("You already joined a company. New applications are disabled.", "warning");
+        return;
+      }
       this.applying = drive.id;
       try {
-        await ApiService.studentApply(drive.id);
+        const { data } = await ApiService.studentApply(drive.id);
         drive.already_applied = true;
+        drive.application_id = data?.application?.id || drive.application_id;
+        drive.application_status = data?.application?.status || "applied";
+        drive.application = data?.application || drive.application;
         this.stats.total_applied++;
         await this.refreshCurrentView(true);
-        this.showAlert(`Applied to "${drive.title}" successfully!`, "success");
+        if (this.driveReviewModal.show && this.driveReviewModal.item?.id === drive.id) {
+          this.closeDriveReview();
+        }
+        ppToast(`Applied to "${drive.title}" successfully!`, "success");
       } catch (e) {
-        this.showAlert(e.response?.data?.message || "Failed to apply", "danger");
+        ppToast(e.response?.data?.message || "Failed to apply to drive", "danger");
+        console.error("Apply drive error:", e);
       } finally { this.applying = null; }
     },
 
+    async unapplyDrive(drive) {
+      const appId = drive?.application_id || drive?.application?.id;
+      if (!appId) {
+        ppToast("No active application found for this drive", "warning");
+        return;
+      }
+
+      const confirmed = confirm(`Withdraw application for "${drive.title}"?`);
+      if (!confirmed) return;
+
+      this.applying = drive.id;
+      try {
+        await ApiService.studentWithdraw(appId);
+        drive.already_applied = false;
+        drive.application_id = null;
+        drive.application_status = null;
+        drive.application = null;
+        await this.refreshCurrentView(true);
+        ppToast("Application withdrawn successfully", "success");
+      } catch (e) {
+        ppToast(e.response?.data?.message || "Failed to unapply", "danger");
+        console.error("Unapply error:", e);
+      } finally {
+        this.applying = null;
+      }
+    },
+
+    resolveApplicationStatus(drive) {
+      return drive?.application_status || drive?.application?.status || null;
+    },
+
     async withdrawApp(app) {
-      if (!confirm(`Withdraw application for "${app.drive_title}"?`)) return;
+      const confirmed = confirm(`Are you sure you want to withdraw your application for "${app.drive_title}"?\n\nThis action cannot be undone.`);
+      if (!confirmed) return;
+
       try {
         await ApiService.studentWithdraw(app.id);
         this.myApplications = this.myApplications.filter(a => a.id !== app.id);
         this.stats.total_applied--;
         await this.refreshCurrentView(true);
-        this.showAlert("Application withdrawn", "success");
+        ppToast("Application withdrawn successfully", "success");
       } catch (e) {
-        this.showAlert(e.response?.data?.message || "Cannot withdraw", "danger");
+        ppToast(e.response?.data?.message || "Failed to withdraw application", "danger");
+        console.error("Withdraw error:", e);
       }
     },
 
     viewOffer(app) {
       const text = app.remarks || "No offer document link provided.";
       const match = text.match(/https?:\/\/\S+/i);
-      if (match && confirm("Open offer document link in a new tab?")) {
+      if (match && confirm("Open offer document in a new tab?")) {
         window.open(match[0], "_blank", "noopener,noreferrer");
         return;
       }
-      this.showAlert(text, "info");
+      ppToast(text, "info");
     },
 
-    async respondToOffer(app, decision) {
-      const isAccept = decision === "accept";
-      const actionText = isAccept ? "accept" : "decline";
-      if (!confirm(`Are you sure you want to ${actionText} this offer?`)) return;
+    async respondToOffer(app) {
+      const message = "Are you sure you want to accept this offer? This will lock your placement and void all other active applications.";
 
-      let note = "";
-      if (!isAccept) {
-        note = prompt("Optional: share a reason for declining") || "";
-      }
+      const confirmed = confirm(message);
+      if (!confirmed) return;
 
       try {
-        const { data } = await ApiService.studentOfferResponse(app.id, { decision, note });
-        app.status = data.application?.status || (isAccept ? "hired" : "offer_declined");
+        const { data } = await ApiService.studentOfferResponse(app.id, { decision: "accept" });
+        app.status = data.application?.status || "joined";
         app.remarks = data.application?.remarks || app.remarks;
         await this.refreshCurrentView(true);
-        this.showAlert(data.message || `Offer ${isAccept ? "accepted" : "declined"}`, isAccept ? "success" : "warning");
+        const message = data.message || "Offer accepted successfully";
+        ppToast(message, "success");
       } catch (e) {
-        this.showAlert(e.response?.data?.message || "Failed to submit offer response", "danger");
+        ppToast(e.response?.data?.message || "Failed to accept offer", "danger");
+        console.error("Offer response error:", e);
+      }
+    },
+
+    async respondToInterview(app) {
+      const confirmed = confirm("Accept this interview call?");
+      if (!confirmed) return;
+
+      try {
+        const { data } = await ApiService.studentInterviewResponse(app.id, { decision: "accept" });
+        app.status = data.application?.status || "interview_accepted";
+        await this.refreshCurrentView(true);
+        ppToast(data.message || "Interview accepted", "success");
+      } catch (e) {
+        ppToast(e.response?.data?.message || "Failed to accept interview", "danger");
       }
     },
 
@@ -621,8 +997,11 @@ const StudentDashboard = {
         this.profileForm.full_name = this.student.full_name || "";
         this.profileForm.phone = this.student.phone || "";
         this.profileForm.dob = this.student.dob || "";
-        this.showAlert("Profile updated successfully", "success");
-      } catch { this.showAlert("Failed to update profile", "danger"); }
+        ppToast("Profile updated successfully", "success");
+      } catch (e) {
+        ppToast(e.response?.data?.message || "Failed to update profile", "danger");
+        console.error("Profile update error:", e);
+      }
       finally  { this.savingProfile = false; }
     },
 
@@ -633,8 +1012,11 @@ const StudentDashboard = {
         await ApiService.studentUploadResume(this.resumeFile);
         this.student.resume_path = this.resumeFile.name;
         this.resumeFile = null;
-        this.showAlert("Resume uploaded successfully", "success");
-      } catch { this.showAlert("Failed to upload resume", "danger"); }
+        ppToast("Resume uploaded successfully", "success");
+      } catch (e) {
+        ppToast(e.response?.data?.message || "Failed to upload resume", "danger");
+        console.error("Resume upload error:", e);
+      }
       finally  { this.uploadingResume = false; }
     },
 
@@ -642,19 +1024,31 @@ const StudentDashboard = {
       this.exporting = true;
       try {
         await ApiService.studentExport();
-        this.showAlert("Export started — you'll receive an email when ready", "success");
-      } catch { this.showAlert("Export failed", "danger"); }
+        ppToast("Export started — you'll receive an email when ready", "success");
+      } catch (e) {
+        ppToast(e.response?.data?.message || "Export failed", "danger");
+        console.error("Export error:", e);
+      }
       finally  { this.exporting = false; }
     },
 
     formatDate(dt) {
       if (!dt) return "—";
-      return new Date(dt).toLocaleDateString("en-IN", { day:"numeric", month:"short", year:"numeric" });
+      return new Date(dt).toLocaleDateString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
     },
 
-    showAlert(msg, type = "success") {
-      if (typeof window.ppToast === "function") {
-        window.ppToast(msg, type);
+    setSortBy(field) {
+      if (field === '#') return;
+      if (this.historySortBy === field) {
+        this.historySortDir = this.historySortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.historySortBy = field;
+        this.historySortDir = field === 'applied_at' ? 'desc' : 'asc';
       }
     },
   }

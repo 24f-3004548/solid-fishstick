@@ -10,6 +10,7 @@ load_dotenv(os.path.join(BACKEND_DIR, ".env"))
 
 from app.config import config_map
 from app.extensions import db, jwt, mail, init_celery
+from app.schema_migrations import run_schema_migrations
 
 
 def create_app(env: str = "development") -> Flask:
@@ -23,7 +24,12 @@ def create_app(env: str = "development") -> Flask:
 
     # Extensions
     configured_origins = app.config.get("FRONTEND_URLS", [app.config["FRONTEND_URL"]])
-    local_dev_origins = [r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"]
+    local_dev_origins = [
+        r"^http://(localhost|127\.0\.0\.1)(:\d+)?$",
+        r"^http://10\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?$",
+        r"^http://192\.168\.\d{1,3}\.\d{1,3}(:\d+)?$",
+        r"^http://172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}(:\d+)?$",
+    ]
     CORS(app, supports_credentials=True, origins=[*configured_origins, *local_dev_origins])
     db.init_app(app)
     jwt.init_app(app)
@@ -49,6 +55,7 @@ def create_app(env: str = "development") -> Flask:
     # Create tables + seed admin
     with app.app_context():
         db.create_all()
+        run_schema_migrations()
         _seed_admin(app)
 
     return app

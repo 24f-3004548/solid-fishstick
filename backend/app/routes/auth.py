@@ -34,6 +34,10 @@ def _hash_token(raw_token: str) -> str:
     return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
 
 
+def _is_valid_password(password: str) -> bool:
+    return len(password) >= 6 and password.isalnum()
+
+
 # ------------------------------------------------------------------ /register/student
 
 @auth_bp.route("/register/student", methods=["POST"])
@@ -41,7 +45,7 @@ def register_student():
     data = request.get_json(silent=True) or {}
 
     # --- required fields ---
-    required = ["email", "password", "full_name", "roll_number", "phone", "dob", "branch", "year", "cgpa"]
+    required = ["email", "password", "full_name", "phone", "dob", "branch", "year", "cgpa"]
     missing  = [f for f in required if not data.get(f)]
     if missing:
         return _error(f"Missing fields: {', '.join(missing)}")
@@ -50,9 +54,6 @@ def register_student():
 
     if User.query.filter_by(email=email).first():
         return _error("Email already registered")
-
-    if Student.query.filter_by(roll_number=data["roll_number"]).first():
-        return _error("Roll number already registered")
 
     # --- validate types ---
     try:
@@ -67,8 +68,8 @@ def register_student():
     if year not in [1, 2, 3, 4]:
         return _error("Year must be 1, 2, 3, or 4")
 
-    if len(data["password"]) < 6:
-        return _error("Password must be at least 6 characters")
+    if not _is_valid_password(data["password"]):
+        return _error("Password must be alphanumeric and at least 6 characters")
 
     try:
         dob = datetime.strptime(str(data["dob"]).strip(), "%Y-%m-%d").date()
@@ -94,7 +95,6 @@ def register_student():
     student = Student(
         user_id=user.id,
         full_name=data["full_name"],
-        roll_number=data["roll_number"],
         branch=data["branch"],
         year=year,
         cgpa=cgpa,
@@ -123,8 +123,8 @@ def register_company():
     if User.query.filter_by(email=email).first():
         return _error("Email already registered")
 
-    if len(data["password"]) < 6:
-        return _error("Password must be at least 6 characters")
+    if not _is_valid_password(data["password"]):
+        return _error("Password must be alphanumeric and at least 6 characters")
 
     user = User(
         email=email,
@@ -268,8 +268,8 @@ def change_password():
     if not check_password_hash(user.password_hash, old_pw):
         return _error("Old password is incorrect", 401)
 
-    if len(new_pw) < 6:
-        return _error("New password must be at least 6 characters")
+    if not _is_valid_password(new_pw):
+        return _error("New password must be alphanumeric and at least 6 characters")
 
     user.password_hash = generate_password_hash(new_pw)
     log_audit(
@@ -313,7 +313,7 @@ def forgot_password():
     db.session.add(token)
     db.session.commit()
 
-    frontend_url = current_app.config.get("FRONTEND_URL", "http://127.0.0.1:8080").rstrip("/")
+    frontend_url = current_app.config.get("FRONTEND_URL", "http://127.0.0.1:5500").rstrip("/")
     reset_link = f"{frontend_url}/#/reset-password?token={raw_token}"
 
     try:
@@ -347,8 +347,8 @@ def reset_password():
     if not raw_token or not new_password:
         return _error("Both token and new_password are required")
 
-    if len(new_password) < 6:
-        return _error("Password must be at least 6 characters")
+    if not _is_valid_password(new_password):
+        return _error("Password must be alphanumeric and at least 6 characters")
 
     token = PasswordResetToken.query.filter_by(token_hash=_hash_token(raw_token)).first()
     if not token or not token.is_valid():

@@ -1,15 +1,41 @@
 const AdminDashboard = {
+  props: {
+    section: {
+      type: String,
+      default: "overview",
+    },
+  },
   template: `
-  <div class="container py-4">
+  <div class="portal-page py-4 role-shell">
 
-    <!-- Header -->
-    <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
-      <div>
-        <h2 class="mb-0">Admin Dashboard</h2>
-        <p class="text-muted mb-0" style="font-size:.9rem">Placement Portal Control Centre</p>
+    <aside class="role-sidebar pp-card">
+      <div class="role-sidebar-head">
+        <div class="portal-subtitle">Admin</div>
+        <h6>Navigation</h6>
       </div>
-      <div class="d-flex gap-2">
-        <div class="input-group" style="width:260px">
+      <nav class="role-sidebar-nav">
+        <button
+          v-for="tab in tabs"
+          :key="'admin_sb_' + tab.key"
+          type="button"
+          :class="['role-sidebar-link', { active: activeTab === tab.key }]"
+          @click="goToTab(tab.key)">
+          <i :class="tab.icon"></i>
+          <span>{{ tab.label }}</span>
+        </button>
+      </nav>
+    </aside>
+
+    <div class="role-main">
+
+    <div class="portal-hero flex-wrap">
+      <div>
+        <div class="portal-subtitle">Institutional Administration</div>
+        <h2 class="mb-0">Moderation & System Control</h2>
+        <p>Audit onboarding activity, monitor approvals, and manage platform-wide placement operations.</p>
+      </div>
+      <div class="portal-panel" style="width:300px;">
+        <div class="input-group">
           <span class="input-group-text"><i class="bi bi-search"></i></span>
           <input v-model="globalSearch" class="form-control" placeholder="Search students, companies..."
             @input="debouncedGlobalSearch"/>
@@ -33,7 +59,7 @@ const AdminDashboard = {
             class="d-flex align-items-center justify-content-between py-2 border-bottom">
             <div>
               <div style="font-size:.9rem;font-weight:500">{{ s.full_name }}</div>
-              <div class="text-muted" style="font-size:.78rem">{{ s.roll_number }} · {{ s.branch }}</div>
+              <div class="text-muted" style="font-size:.78rem">{{ s.email }} · {{ s.branch }}</div>
             </div>
             <span v-if="s.is_blacklisted" class="status-badge rejected">blacklisted</span>
           </div>
@@ -65,94 +91,137 @@ const AdminDashboard = {
       </div>
     </div>
 
-    <!-- Tabs -->
-    <ul class="nav nav-pills mb-4" style="gap:.5rem">
-      <li v-for="t in tabs" :key="t.key">
-        <button :class="['btn btn-sm', activeTab===t.key ? 'btn-primary' : 'btn-outline-secondary']"
-          @click="activeTab=t.key">
-          <i :class="t.icon+' me-1'"></i>{{ t.label }}
-          <span v-if="t.badge" class="badge bg-danger ms-1" style="font-size:.65rem">{{ t.badge }}</span>
-        </button>
-      </li>
-    </ul>
-
     <!-- ── TAB: Overview ───────────────────────────────────── -->
     <div v-if="activeTab==='overview'">
       <div class="row g-3 mb-4">
-        <div class="col-6 col-md-3" v-for="s in statCards" :key="s.label">
-          <div class="stat-card">
-            <div class="stat-icon" :style="{background:s.bg}">
-              <i :class="s.icon" :style="{color:s.color}"></i>
+        <div class="col-lg-6">
+          <div class="pp-card h-100" style="background:linear-gradient(135deg,#003f87 0%,#0056b3 100%);color:#fff;">
+            <div class="d-flex align-items-center justify-content-between mb-3">
+              <div style="font-size:.72rem;letter-spacing:.12em;font-weight:700;opacity:.8;" class="text-uppercase">Success Metric</div>
+              <span class="badge" style="background:rgba(255,255,255,.2);color:#fff;">Live</span>
             </div>
-            <div>
-              <div class="stat-value">{{ s.value }}</div>
-              <div class="stat-label">{{ s.label }}</div>
+            <div style="font-size:2.25rem;font-weight:800;line-height:1;">
+              {{ stats.total_students ? (((stats.selected_students || 0) / stats.total_students) * 100).toFixed(1) : '0.0' }}%
             </div>
+            <div style="opacity:.86;margin-top:.5rem;">Overall Placement Rate</div>
+            <div class="d-flex justify-content-between mt-4" style="font-size:.8rem;opacity:.9;">
+              <span>{{ stats.selected_students || 0 }} selected</span>
+              <span>{{ stats.total_students || 0 }} students</span>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-3 col-6">
+          <div class="pp-card h-100 d-flex flex-column justify-content-between">
+            <div class="d-flex justify-content-between align-items-start">
+              <span style="font-size:.72rem;letter-spacing:.09em;font-weight:700;" class="text-uppercase text-muted">Total Students</span>
+              <span class="status-badge approved">Active</span>
+            </div>
+            <div style="font-size:2rem;font-weight:800;line-height:1;">{{ stats.total_students || 0 }}</div>
+          </div>
+        </div>
+        <div class="col-lg-3 col-6">
+          <div class="pp-card h-100 d-flex flex-column justify-content-between">
+            <div class="d-flex justify-content-between align-items-start">
+              <span style="font-size:.72rem;letter-spacing:.09em;font-weight:700;" class="text-uppercase text-muted">Placement Drives</span>
+              <span class="status-badge pending">Ongoing</span>
+            </div>
+            <div style="font-size:2rem;font-weight:800;line-height:1;">{{ stats.total_drives || 0 }}</div>
           </div>
         </div>
       </div>
 
-      <!-- Pending approvals -->
       <div class="row g-4">
-        <div class="col-md-6">
+        <div class="col-xl-4">
           <div class="pp-card h-100">
             <div class="d-flex align-items-center justify-content-between mb-3">
-              <h6 class="mb-0 fw-600">Pending companies</h6>
-              <button class="btn btn-sm btn-outline-primary" @click="activeTab='companies'">View all</button>
+              <h6 class="mb-0 fw-bold">Approval Queue</h6>
+              <span class="badge bg-danger">{{ (pendingCompanies.length || 0) + (pendingDrives.length || 0) }} pending</span>
             </div>
+
             <div v-if="loadingDash" class="pp-spinner"><div class="spinner-border spinner-border-sm"></div></div>
-            <div v-else-if="pendingCompanies.length===0" class="empty-state">
-              <i class="bi bi-building"></i>No pending approvals
-            </div>
+
             <div v-else class="d-flex flex-column gap-2">
-              <div v-for="c in pendingCompanies.slice(0,4)" :key="c.id"
-                class="d-flex align-items-center justify-content-between p-2 rounded"
-                style="background:var(--surface-2)">
-                <div>
-                  <div style="font-weight:500;font-size:.9rem">{{ c.name }}</div>
-                  <div class="text-muted" style="font-size:.78rem">{{ c.hr_email }}</div>
+              <div v-for="c in pendingCompanies.slice(0,2)" :key="'pc_'+c.id" class="p-3 rounded-3" style="background:var(--surface-1);border-left:3px solid var(--brand);">
+                <div class="d-flex justify-content-between align-items-start">
+                  <div>
+                    <div class="fw-semibold">{{ c.name }}</div>
+                    <div class="text-muted" style="font-size:.78rem;">Company registration</div>
+                  </div>
+                  <small class="text-muted">{{ formatDateOnly(c.created_at) }}</small>
                 </div>
-                <div class="d-flex gap-1">
-                  <button class="btn btn-sm btn-success" @click="approveCompany(c)">
-                    <i class="bi bi-check"></i>
-                  </button>
-                  <button class="btn btn-sm btn-danger" @click="openRejectModal('company', c)">
-                    <i class="bi bi-x"></i>
-                  </button>
+                <div class="d-flex gap-2 mt-2">
+                  <button class="btn btn-sm btn-primary" @click="approveCompany(c)">Approve</button>
+                  <button class="btn btn-sm btn-outline-danger" @click="openRejectModal('company', c)">Decline</button>
                 </div>
               </div>
+
+              <div v-for="d in pendingDrives.slice(0,2)" :key="'pd_'+d.id" class="p-3 rounded-3" style="background:var(--surface-1);border-left:3px solid #983c00;">
+                <div class="d-flex justify-content-between align-items-start">
+                  <div>
+                    <div class="fw-semibold">{{ d.title }}</div>
+                    <div class="text-muted" style="font-size:.78rem;">{{ d.company_name }}</div>
+                  </div>
+                  <small class="text-muted">{{ formatDateOnly(d.created_at) }}</small>
+                </div>
+                <div class="d-flex gap-2 mt-2">
+                  <button class="btn btn-sm btn-primary" @click="openDriveReview(d)">Review</button>
+                </div>
+              </div>
+
+              <button class="btn btn-outline-secondary btn-sm mt-1" @click="goToTab('companies')">View all pending actions</button>
             </div>
           </div>
         </div>
 
-        <div class="col-md-6">
+        <div class="col-xl-8">
           <div class="pp-card h-100">
-            <div class="d-flex align-items-center justify-content-between mb-3">
-              <h6 class="mb-0 fw-600">Pending drives</h6>
-              <button class="btn btn-sm btn-outline-primary" @click="activeTab='drives'">View all</button>
-            </div>
-            <div v-if="loadingDash" class="pp-spinner"><div class="spinner-border spinner-border-sm"></div></div>
-            <div v-else-if="pendingDrives.length===0" class="empty-state">
-              <i class="bi bi-briefcase"></i>No pending drives
-            </div>
-            <div v-else class="d-flex flex-column gap-2">
-              <div v-for="d in pendingDrives.slice(0,4)" :key="d.id"
-                class="d-flex align-items-center justify-content-between p-2 rounded"
-                style="background:var(--surface-2)">
-                <div>
-                  <div style="font-weight:500;font-size:.9rem">{{ d.title }}</div>
-                  <div class="text-muted" style="font-size:.78rem">{{ d.company_name }}</div>
-                </div>
-                <div class="d-flex gap-1">
-                  <button class="btn btn-sm btn-success" @click="approveDrive(d)">
-                    <i class="bi bi-check"></i>
-                  </button>
-                  <button class="btn btn-sm btn-danger" @click="openRejectModal('drive', d)">
-                    <i class="bi bi-x"></i>
-                  </button>
-                </div>
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+              <div>
+                <h6 class="mb-0 fw-bold">Student & Company Roster</h6>
+                <small class="text-muted">Recent entities and platform status snapshot</small>
+              </div>
+              <div class="d-flex gap-2">
+                <button class="btn btn-sm btn-outline-primary" @click="goToTab('students')">Students</button>
+                <button class="btn btn-sm btn-outline-primary" @click="goToTab('companies')">Companies</button>
               </div>
             </div>
+
+            <table class="pp-table mb-0">
+              <thead>
+                <tr>
+                  <th>Metric</th>
+                  <th>Value</th>
+                  <th>Status</th>
+                  <th class="text-end">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="fw-semibold">Applications</td>
+                  <td>{{ stats.total_applications || 0 }}</td>
+                  <td><span class="status-badge approved">Live</span></td>
+                  <td class="text-end"><button class="btn btn-sm btn-outline-secondary" @click="goToTab('applications')">Open</button></td>
+                </tr>
+                <tr>
+                  <td class="fw-semibold">Pending companies</td>
+                  <td>{{ stats.pending_companies || 0 }}</td>
+                  <td><span class="status-badge pending">Review</span></td>
+                  <td class="text-end"><button class="btn btn-sm btn-outline-secondary" @click="goToTab('companies')">Open</button></td>
+                </tr>
+                <tr>
+                  <td class="fw-semibold">Pending drives</td>
+                  <td>{{ stats.pending_drives || 0 }}</td>
+                  <td><span class="status-badge pending">Review</span></td>
+                  <td class="text-end"><button class="btn btn-sm btn-outline-secondary" @click="goToTab('drives')">Open</button></td>
+                </tr>
+                <tr>
+                  <td class="fw-semibold">System health</td>
+                  <td>Runtime</td>
+                  <td><span class="status-badge approved">Stable</span></td>
+                  <td class="text-end"><button class="btn btn-sm btn-outline-secondary" @click="goToTab('health')">Inspect</button></td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -227,7 +296,7 @@ const AdminDashboard = {
     <div v-if="activeTab==='students'">
       <div class="pp-card mb-3">
         <input v-model="studentSearch" class="form-control" style="max-width:340px"
-          placeholder="Search by name, roll number, branch..."
+          placeholder="Search by name or branch..."
           @input="debouncedStudentSearch"/>
       </div>
 
@@ -239,14 +308,13 @@ const AdminDashboard = {
         <table class="pp-table">
           <thead>
             <tr>
-              <th>Name</th><th>Roll no.</th><th>Branch</th>
+              <th>Name</th><th>Branch</th>
               <th>Year</th><th>CGPA</th><th>Status</th><th>Actions</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="s in students" :key="s.id">
               <td class="fw-500">{{ s.full_name }}</td>
-              <td class="mono text-muted">{{ s.roll_number }}</td>
               <td>{{ s.branch }}</td>
               <td>{{ s.year }}</td>
               <td>{{ s.cgpa }}</td>
@@ -311,10 +379,8 @@ const AdminDashboard = {
               <td><span :class="'status-badge '+d.status">{{ d.status }}</span></td>
               <td>
                 <div class="d-flex gap-1 flex-wrap">
-                  <button v-if="d.status==='pending'" class="btn btn-sm btn-success"
-                    @click="approveDrive(d)">Approve</button>
-                  <button v-if="d.status==='pending'" class="btn btn-sm btn-danger"
-                    @click="openRejectModal('drive', d)">Reject</button>
+                  <button v-if="d.status==='pending'" class="btn btn-sm btn-primary"
+                    @click="openDriveReview(d)">Review</button>
                   <button v-if="d.status==='approved'" class="btn btn-sm btn-outline-secondary"
                     @click="closeDrive(d)">Close</button>
                 </div>
@@ -332,7 +398,7 @@ const AdminDashboard = {
           <div class="col-md-4">
             <select v-model="appStatus" class="form-select" @change="fetchApplications">
               <option value="">All statuses</option>
-              <option v-for="s in ['applied','shortlisted','offered','hired','selected','offer_declined','rejected','waiting']"
+              <option v-for="s in ['applied','accepted','interview','interview_accepted','offered','joined','offer_withdrawn','void_joined_elsewhere','rejected']"
                 :key="s" :value="s">{{ s }}</option>
             </select>
           </div>
@@ -366,6 +432,25 @@ const AdminDashboard = {
 
     <!-- ── TAB: Reports ────────────────────────────────────── -->
     <div v-if="activeTab==='reports'">
+      <div class="d-flex align-items-center justify-content-between mb-3">
+        <h6 class="mb-0 fw-600">Placement activity report</h6>
+        <div class="d-flex gap-2">
+          <button class="btn btn-sm btn-outline-primary" @click="fetchReport"
+            :disabled="loadingReport || sendingReport">
+            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+          </button>
+          <button class="btn btn-sm btn-primary" @click="sendInstantReport"
+            :disabled="loadingReport || sendingReport">
+            <i class="bi bi-envelope me-1"></i>
+            <span v-if="sendingReport" class="spinner-border spinner-border-sm me-1"></span>
+            {{ sendingReport ? 'Sending...' : 'Send Report' }}
+          </button>
+        </div>
+      </div>
+      <div v-if="reportMessage" :class="['pp-alert', reportMessage.type === 'danger' ? 'alert-danger' : 'alert-success', 'mb-3']">
+        <i :class="reportMessage.type === 'danger' ? 'bi bi-exclamation-circle-fill' : 'bi bi-check-circle-fill'"></i>
+        {{ reportMessage.text }}
+      </div>
       <div v-if="loadingReport" class="pp-spinner"><div class="spinner-border text-primary"></div></div>
       <div v-else-if="report" class="row g-4">
 
@@ -513,6 +598,84 @@ const AdminDashboard = {
       </div>
     </div>
 
+    <!-- ── Drive review modal ─────────────────────────────── -->
+    <div v-if="driveReviewModal.show"
+      style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1050;
+             display:flex;align-items:center;justify-content:center;padding:1rem">
+      <div class="pp-card" style="width:100%;max-width:680px;max-height:90vh;overflow:auto;">
+        <div class="d-flex justify-content-between align-items-start mb-3 gap-3">
+          <div>
+            <h6 class="fw-600 mb-1">{{ driveReviewModal.item.title }}</h6>
+            <div class="text-muted" style="font-size:.86rem;">{{ driveReviewModal.item.company_name }}</div>
+          </div>
+          <span :class="'status-badge '+driveReviewModal.item.status">{{ driveReviewModal.item.status }}</span>
+        </div>
+
+        <div class="row g-3">
+          <div class="col-md-6">
+            <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Job Type</div>
+            <div class="fw-500">{{ driveReviewModal.item.job_type || '—' }}</div>
+          </div>
+          <div class="col-md-6">
+            <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Location</div>
+            <div class="fw-500">{{ driveReviewModal.item.location || '—' }}</div>
+          </div>
+          <div class="col-md-6">
+            <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Salary</div>
+            <div class="fw-500">{{ driveReviewModal.item.salary_lpa ? ('₹' + driveReviewModal.item.salary_lpa + ' LPA') : '—' }}</div>
+          </div>
+          <div class="col-md-6">
+            <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Minimum CGPA</div>
+            <div class="fw-500">{{ driveReviewModal.item.min_cgpa ?? '—' }}</div>
+          </div>
+          <div class="col-md-6">
+            <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Eligible Branches</div>
+            <div class="fw-500">
+              {{ Array.isArray(driveReviewModal.item.eligible_branches) && driveReviewModal.item.eligible_branches.length
+                ? driveReviewModal.item.eligible_branches.join(', ')
+                : 'All branches' }}
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Eligible Years</div>
+            <div class="fw-500">
+              {{ Array.isArray(driveReviewModal.item.eligible_years) && driveReviewModal.item.eligible_years.length
+                ? driveReviewModal.item.eligible_years.join(', ')
+                : 'All years' }}
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Apply Deadline</div>
+            <div class="fw-500">{{ formatDate(driveReviewModal.item.application_deadline) }}</div>
+          </div>
+          <div class="col-md-6">
+            <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Drive Date</div>
+            <div class="fw-500">{{ driveReviewModal.item.drive_date ? formatDate(driveReviewModal.item.drive_date) : '—' }}</div>
+          </div>
+          <div class="col-12">
+            <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Description</div>
+            <div class="portal-panel mt-1" style="white-space:pre-wrap;font-size:.88rem;">{{ driveReviewModal.item.description || '—' }}</div>
+          </div>
+        </div>
+
+        <div class="d-flex gap-2 justify-content-end mt-4">
+          <button class="btn btn-outline-secondary" @click="closeDriveReview">Close</button>
+          <button
+            v-if="driveReviewModal.item.status==='pending'"
+            class="btn btn-danger"
+            @click="openRejectFromDriveReview">
+            Reject
+          </button>
+          <button
+            v-if="driveReviewModal.item.status==='pending'"
+            class="btn btn-success"
+            @click="approveDrive(driveReviewModal.item)">
+            Approve
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- ── Reject modal ────────────────────────────────────── -->
     <div v-if="rejectModal.show"
       style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1050;
@@ -583,12 +746,13 @@ const AdminDashboard = {
       </div>
     </div>
 
+    </div>
   </div>
   `,
 
   data() {
     return {
-      activeTab: "overview",
+      activeTab: this.section || "overview",
       tabs: [
         { key: "overview",      label: "Overview",      icon: "bi bi-speedometer2" },
         { key: "companies",     label: "Companies",     icon: "bi bi-building" },
@@ -617,6 +781,8 @@ const AdminDashboard = {
       loadingReport:    false,
       loadingHealth:    false,
       loadingAudit:     false,
+      sendingReport:    false,
+      reportMessage:    null,
       companySearch:    "",
       companyStatus:    "pending",
       studentSearch:    "",
@@ -630,6 +796,7 @@ const AdminDashboard = {
       searchResults:    null,
       alert:    { msg: "", type: "success" },
       rejectModal:    { show: false, type: "", item: {}, reason: "" },
+      driveReviewModal: { show: false, item: {} },
       blacklistModal: { show: false, type: "", item: {}, reason: "" },
       rejectValidation: { submitted: false },
       blacklistValidation: { submitted: false },
@@ -656,6 +823,9 @@ const AdminDashboard = {
   },
 
   watch: {
+    section(next) {
+      this.activeTab = next || "overview";
+    },
     activeTab(tab) {
       if (tab === "companies")    this.fetchCompanies();
       if (tab === "students")     this.fetchStudents();
@@ -681,6 +851,25 @@ const AdminDashboard = {
   },
 
   methods: {
+    routeForTab(tab) {
+      const map = {
+        overview: "/admin/dashboard",
+        companies: "/admin/companies",
+        students: "/admin/students",
+        drives: "/admin/drives",
+        applications: "/admin/applications",
+        reports: "/admin/reports",
+        health: "/admin/system-health",
+        audit: "/admin/audit-logs",
+      };
+      return map[tab] || "/admin/dashboard";
+    },
+
+    goToTab(tab) {
+      const target = this.routeForTab(tab);
+      if (this.$route.path !== target) this.$router.push(target);
+    },
+
     async refreshCurrentView(silent = false) {
       await this.fetchDashboard(silent);
       if (this.activeTab === "companies") await this.fetchCompanies(silent);
@@ -774,6 +963,29 @@ const AdminDashboard = {
       finally  { this.loadingReport = false; }
     },
 
+    async sendInstantReport() {
+      this.sendingReport = true;
+      this.reportMessage = null;
+      try {
+        const { data } = await ApiService.adminSendInstantReport();
+        this.reportMessage = {
+          type: "success",
+          text: data.message || "Report sent successfully to admin email!"
+        };
+        // Auto-dismiss after 5 seconds
+        setTimeout(() => {
+          this.reportMessage = null;
+        }, 5000);
+      } catch (err) {
+        const msg = err.response?.data?.message ||  err.message || "Failed to send report";
+        this.reportMessage = {
+          type: "danger",
+          text: msg
+        };
+      }
+      finally { this.sendingReport = false; }
+    },
+
     async fetchSystemHealth(silent = false) {
       this.loadingHealth = true;
       try {
@@ -837,6 +1049,19 @@ const AdminDashboard = {
     },
 
     // ── Drive actions ──
+    openDriveReview(drive) {
+      this.driveReviewModal = { show: true, item: drive };
+    },
+
+    closeDriveReview() {
+      this.driveReviewModal = { show: false, item: {} };
+    },
+
+    openRejectFromDriveReview() {
+      this.openRejectModal("drive", this.driveReviewModal.item);
+      this.closeDriveReview();
+    },
+
     async approveDrive(d) {
       try {
         await ApiService.adminApproveDrive(d.id);
@@ -844,6 +1069,9 @@ const AdminDashboard = {
         this.pendingDrives = this.pendingDrives.filter(x => x.id !== d.id);
         this.stats.pending_drives = Math.max(0, (this.stats.pending_drives||0) - 1);
         this.tabs[3].badge = this.pendingDrives.length || null;
+        if (this.driveReviewModal.show && this.driveReviewModal.item?.id === d.id) {
+          this.closeDriveReview();
+        }
         await this.refreshCurrentView(true);
         this.showAlert(`"${d.title}" approved`, "success");
       } catch (e) { this.showAlert(e.response?.data?.message || "Failed", "danger"); }
@@ -965,7 +1193,25 @@ const AdminDashboard = {
 
     formatDate(dt) {
       if (!dt) return "—";
-      return new Date(dt).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+      return new Date(dt).toLocaleString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }) + " IST";
+    },
+
+    formatDateOnly(dt) {
+      if (!dt) return "";
+      return new Date(dt).toLocaleDateString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
     },
 
     healthBadgeClass(status) {

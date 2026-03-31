@@ -6,6 +6,8 @@ from app import create_app
 
 env = os.getenv("FLASK_ENV", "development")
 app = create_app(env)
+backend_port = int(os.getenv("BACKEND_PORT", 5001))
 
 if __name__ == "__main__":
-    app.run(debug=(env == "development"), port=5000)
+    
+    app.run(host="0.0.0.0",port = backend_port, debug=(env == "development"))

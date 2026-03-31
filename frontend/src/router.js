@@ -22,6 +22,16 @@ function redirectIfLoggedIn(to, from, next) {
   next();
 }
 
+function roleSection(component, role, section, path) {
+  return {
+    path,
+    component,
+    props: { section },
+    meta: { role, section },
+    beforeEnter: requireRole(role),
+  };
+}
+
 // ── Routes ───────────────────────────────────────────────────────────────────
 const routes = [
   // Default redirect
@@ -34,19 +44,34 @@ const routes = [
   }},
 
   // Auth
-  { path: "/login",    component: LoginView,    beforeEnter: redirectIfLoggedIn },
-  { path: "/register", component: RegisterView, beforeEnter: redirectIfLoggedIn },
-  { path: "/forgot-password", component: ForgotPasswordView, beforeEnter: redirectIfLoggedIn },
-  { path: "/reset-password", component: ResetPasswordView, beforeEnter: redirectIfLoggedIn },
+  { path: "/login",    component: LoginView,    beforeEnter: redirectIfLoggedIn, meta: { hideNavbar: true } },
+  { path: "/register", component: RegisterView, beforeEnter: redirectIfLoggedIn, meta: { hideNavbar: true } },
+  { path: "/forgot-password", component: ForgotPasswordView, beforeEnter: redirectIfLoggedIn, meta: { hideNavbar: true } },
+  { path: "/reset-password", component: ResetPasswordView, beforeEnter: redirectIfLoggedIn, meta: { hideNavbar: true } },
 
   // Admin routes
-  { path: "/admin/dashboard", component: AdminDashboard, beforeEnter: requireRole("admin") },
+  roleSection(AdminDashboard, "admin", "overview", "/admin/dashboard"),
+  roleSection(AdminDashboard, "admin", "companies", "/admin/companies"),
+  roleSection(AdminDashboard, "admin", "students", "/admin/students"),
+  roleSection(AdminDashboard, "admin", "drives", "/admin/drives"),
+  roleSection(AdminDashboard, "admin", "applications", "/admin/applications"),
+  roleSection(AdminDashboard, "admin", "reports", "/admin/reports"),
+  roleSection(AdminDashboard, "admin", "health", "/admin/system-health"),
+  roleSection(AdminDashboard, "admin", "audit", "/admin/audit-logs"),
 
   // Company routes
-  { path: "/company/dashboard", component: CompanyDashboard, beforeEnter: requireRole("company") },
+  roleSection(CompanyDashboard, "company", "overview", "/company/dashboard"),
+  roleSection(CompanyDashboard, "company", "drives", "/company/drives"),
+  roleSection(CompanyDashboard, "company", "applications", "/company/applications"),
+  roleSection(CompanyDashboard, "company", "history", "/company/hiring-history"),
+  roleSection(CompanyDashboard, "company", "profile", "/company/settings"),
 
   // Student routes
-  { path: "/student/dashboard", component: StudentDashboard, beforeEnter: requireRole("student") },
+  roleSection(StudentDashboard, "student", "overview", "/student/dashboard"),
+  roleSection(StudentDashboard, "student", "drives", "/student/drives"),
+  roleSection(StudentDashboard, "student", "applications", "/student/applications"),
+  roleSection(StudentDashboard, "student", "history", "/student/history"),
+  roleSection(StudentDashboard, "student", "profile", "/student/profile"),
 
   // Catch-all
   { path: "/:pathMatch(.*)*", redirect: "/" },

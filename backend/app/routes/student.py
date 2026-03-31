@@ -13,6 +13,14 @@ student_bp = Blueprint("student", __name__)
 
 ALLOWED_EXTENSIONS = {"pdf"}
 
+LEGACY_STATUS_MAP = {
+    "shortlisted": "accepted",
+    "waiting": "interview",
+    "selected": "joined",
+    "hired": "joined",
+    "offer_declined": "rejected",
+}
+
 # ------------------------------------------------------------------ helpers
 
 def _error(msg, code=400):
@@ -44,6 +52,20 @@ def _actor_user_id():
         return int(get_jwt_identity())
     except (TypeError, ValueError):
         return None
+
+
+def _normalized_status(status):
+    return LEGACY_STATUS_MAP.get(status, status)
+
+
+def _student_joined_application(student_id, exclude_app_id=None):
+    query = Application.query.filter(
+        Application.student_id == student_id,
+        Application.status.in_(["joined", "selected", "hired"]),
+    )
+    if exclude_app_id:
+        query = query.filter(Application.id != exclude_app_id)
+    return query.first()
 
 
 # ==================================================================
@@ -120,12 +142,18 @@ def dashboard():
     if err: return err
 
     apps = student.applications
+    has_joined_offer = any(_normalized_status(a.status) == "joined" for a in apps)
+    joined_app = next((a for a in apps if _normalized_status(a.status) == "joined"), None)
 
     stats = {
         "total_applied":      len(apps),
-        "shortlisted":        sum(1 for a in apps if a.status == "shortlisted"),
-        "selected":           sum(1 for a in apps if a.status in ("selected", "hired")),
-        "rejected":           sum(1 for a in apps if a.status == "rejected"),
+        "accepted":           sum(1 for a in apps if _normalized_status(a.status) == "accepted"),
+        "interview":          sum(1 for a in apps if _normalized_status(a.status) == "interview"),
+        "interview_accepted": sum(1 for a in apps if _normalized_status(a.status) == "interview_accepted"),
+        "offered":            sum(1 for a in apps if _normalized_status(a.status) == "offered"),
+        "joined":             sum(1 for a in apps if _normalized_status(a.status) == "joined"),
+        "voided":             sum(1 for a in apps if _normalized_status(a.status) == "void_joined_elsewhere"),
+        "rejected":           sum(1 for a in apps if _normalized_status(a.status) == "rejected"),
     }
 
     # Get open drives the student hasn't applied to yet
@@ -151,6 +179,8 @@ def dashboard():
     return _ok({
         "student":         student.to_dict(),
         "stats":           stats,
+        "has_joined_offer": has_joined_offer,
+        "joined_application": joined_app.to_dict() if joined_app else None,
         "eligible_drives": [d.to_dict() for d in eligible_drives],
         "recent_applications": [a.to_dict() for a in
                                 sorted(apps, key=lambda x: x.applied_at, reverse=True)[:5]],
@@ -190,18 +220,25 @@ def list_drives():
         query = query.filter_by(job_type=job_type)
 
     drives = query.order_by(PlacementDrive.application_deadline.asc()).all()
+    joined_app = _student_joined_application(student.id)
 
     # Attach eligibility info and applied status
-    applied_drive_ids = {a.drive_id for a in student.applications}
+    student_apps_by_drive = {a.drive_id: a for a in student.applications}
     result = []
     for drive in drives:
         is_eligible, reason = drive.check_student_eligibility(student)
+        if joined_app:
+            is_eligible = False
+            reason = f"You already joined '{joined_app.drive.title}'. New applications are disabled."
         if eligible_only and not is_eligible:
             continue
         d = drive.to_dict()
+        existing_app = student_apps_by_drive.get(drive.id)
         d["is_eligible"]  = is_eligible
         d["ineligible_reason"] = reason if not is_eligible else None
-        d["already_applied"]   = drive.id in applied_drive_ids
+        d["already_applied"]   = existing_app is not None
+        d["application_id"]    = existing_app.id if existing_app else None
+        d["application_status"] = existing_app.status if existing_app else None
         result.append(d)
 
     return _ok({"drives": result, "total": len(result)})
@@ -220,6 +257,11 @@ def get_drive(drive_id):
         return _error("Drive is not available", 404)
 
     is_eligible, reason = drive.check_student_eligibility(student)
+    joined_app = _student_joined_application(student.id)
+    if joined_app:
+        is_eligible = False
+        reason = f"You already joined '{joined_app.drive.title}'. New applications are disabled."
+
     existing_app = Application.query.filter_by(
         student_id=student.id, drive_id=drive_id
     ).first()
@@ -228,6 +270,8 @@ def get_drive(drive_id):
     data["is_eligible"]      = is_eligible
     data["ineligible_reason"] = reason if not is_eligible else None
     data["already_applied"]  = existing_app is not None
+    data["application_id"]   = existing_app.id if existing_app else None
+    data["application_status"] = existing_app.status if existing_app else None
     data["application"]      = existing_app.to_dict() if existing_app else None
 
     return _ok({"drive": data})
@@ -244,6 +288,12 @@ def apply(drive_id):
     if err: return err
 
     drive = PlacementDrive.query.get_or_404(drive_id)
+
+    joined_app = _student_joined_application(student.id)
+    if joined_app:
+        return _error(
+            f"You have already joined '{joined_app.drive.title}'. You cannot apply to other drives."
+        )
 
     # --- gate checks ---
     if drive.status != "approved":
@@ -350,7 +400,7 @@ def withdraw_application(app_id):
 @student_bp.route("/applications/<int:app_id>/offer-response", methods=["PUT"])
 @jwt_required()
 def respond_to_offer(app_id):
-    """Student can accept or decline an offered application."""
+    """Student can accept an offered application and lock placement."""
     student, err = _get_student()
     if err: return err
 
@@ -363,24 +413,40 @@ def respond_to_offer(app_id):
 
     data = request.get_json(silent=True) or {}
     decision = (data.get("decision") or "").strip().lower()
-    if decision not in ("accept", "reject"):
-        return _error("decision must be one of: accept, reject")
+    if decision != "accept":
+        return _error("Only accepting an offer is allowed")
 
     note = (data.get("note") or "").strip()
+    already_joined = _student_joined_application(student.id, exclude_app_id=app.id)
+    if already_joined:
+        return _error("You have already accepted another offer")
 
-    if decision == "accept":
-        app.status = "hired"
-        student_message = f"You accepted the offer for '{app.drive.title}'."
-        company_message = f"{student.full_name} accepted the offer for '{app.drive.title}'."
-        company_notice_type = "success"
-    else:
-        app.status = "offer_declined"
-        student_message = f"You declined the offer for '{app.drive.title}'."
-        company_message = f"{student.full_name} declined the offer for '{app.drive.title}'."
-        company_notice_type = "warning"
+    app.status = "joined"
+    student_message = f"You accepted the offer for '{app.drive.title}'."
+    company_message = f"{student.full_name} accepted the offer for '{app.drive.title}'."
 
     if note:
         app.remarks = f"{app.remarks or ''}\nStudent response note: {note}".strip()
+
+    other_apps = Application.query.filter(
+        Application.student_id == student.id,
+        Application.id != app.id,
+        Application.status.notin_(["joined", "rejected", "offer_withdrawn", "void_joined_elsewhere"]),
+    ).all()
+    for other in other_apps:
+        other.status = "void_joined_elsewhere"
+        other.remarks = (
+            f"{other.remarks or ''}\nApplication voided because student joined '{app.drive.title}'."
+        ).strip()
+        db.session.add(Notification(
+            user_id=other.drive.company.user_id,
+            title="Application voided",
+            message=(
+                f"{student.full_name} joined another company. "
+                f"Application for '{other.drive.title}' is now void."
+            ),
+            type="warning",
+        ))
 
     db.session.add(Notification(
         user_id=student.user_id,
@@ -392,19 +458,59 @@ def respond_to_offer(app_id):
         user_id=app.drive.company.user_id,
         title="Offer response received",
         message=company_message,
-        type=company_notice_type,
+        type="success",
     ))
     log_audit(
         actor_user_id=_actor_user_id(),
         action="student.offer_response",
         entity_type="application",
         entity_id=app.id,
-        details={"decision": decision, "drive_id": app.drive_id},
+        details={"decision": "accept", "drive_id": app.drive_id},
         ip_address=request.remote_addr,
     )
     db.session.commit()
 
     return _ok({"message": student_message, "application": app.to_dict()})
+
+
+@student_bp.route("/applications/<int:app_id>/interview-response", methods=["PUT"])
+@jwt_required()
+def respond_to_interview(app_id):
+    """Student can accept interview call."""
+    student, err = _get_student()
+    if err: return err
+
+    app = Application.query.get_or_404(app_id)
+    if app.student_id != student.id:
+        return _error("Application not found", 404)
+
+    if _normalized_status(app.status) != "interview":
+        return _error(f"Interview response not allowed for status '{app.status}'")
+
+    app.status = "interview_accepted"
+    db.session.add(Notification(
+        user_id=student.user_id,
+        title="Interview confirmed",
+        message=f"You confirmed interview for '{app.drive.title}'.",
+        type="info",
+    ))
+    db.session.add(Notification(
+        user_id=app.drive.company.user_id,
+        title="Interview confirmed",
+        message=f"{student.full_name} accepted interview call for '{app.drive.title}'.",
+        type="success",
+    ))
+    log_audit(
+        actor_user_id=_actor_user_id(),
+        action="student.interview_response",
+        entity_type="application",
+        entity_id=app.id,
+        details={"decision": "accept", "drive_id": app.drive_id},
+        ip_address=request.remote_addr,
+    )
+    db.session.commit()
+
+    return _ok({"message": "Interview accepted", "application": app.to_dict()})
 
 
 # ==================================================================
@@ -430,13 +536,14 @@ def placement_history():
         "history":  [a.to_dict() for a in apps],
         "summary": {
             "total":       len(apps),
-            "selected":    sum(1 for a in apps if a.status in ("selected", "hired")),
-            "rejected":    sum(1 for a in apps if a.status == "rejected"),
-            "shortlisted": sum(1 for a in apps if a.status == "shortlisted"),
-            "offered":     sum(1 for a in apps if a.status == "offered"),
-            "hired":       sum(1 for a in apps if a.status == "hired"),
-            "offer_declined": sum(1 for a in apps if a.status == "offer_declined"),
-            "applied":     sum(1 for a in apps if a.status == "applied"),
+            "joined":      sum(1 for a in apps if _normalized_status(a.status) == "joined"),
+            "rejected":    sum(1 for a in apps if _normalized_status(a.status) == "rejected"),
+            "accepted":    sum(1 for a in apps if _normalized_status(a.status) == "accepted"),
+            "interview":   sum(1 for a in apps if _normalized_status(a.status) == "interview"),
+            "interview_accepted": sum(1 for a in apps if _normalized_status(a.status) == "interview_accepted"),
+            "offered":     sum(1 for a in apps if _normalized_status(a.status) == "offered"),
+            "voided":      sum(1 for a in apps if _normalized_status(a.status) == "void_joined_elsewhere"),
+            "applied":     sum(1 for a in apps if _normalized_status(a.status) == "applied"),
         }
     })
 

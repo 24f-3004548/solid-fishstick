@@ -1,5 +1,6 @@
 from datetime import datetime
 from app.extensions import db
+from app.utils.datetime_utils import to_ist_iso
 
 
 class Application(db.Model):
@@ -40,10 +41,10 @@ class Application(db.Model):
             "company_name":   self.drive.company.name if self.drive and self.drive.company else None,
             "status":         self.status,
             "interview_type": self.interview_type,
-            "interview_date": self.interview_date.isoformat() if self.interview_date else None,
+            "interview_date": to_ist_iso(self.interview_date),
             "remarks":        self.remarks,
-            "applied_at":     self.applied_at.isoformat(),
-            "updated_at":     self.updated_at.isoformat() if self.updated_at else None,
+            "applied_at":     to_ist_iso(self.applied_at),
+            "updated_at":     to_ist_iso(self.updated_at),
         }
 
     def __repr__(self):

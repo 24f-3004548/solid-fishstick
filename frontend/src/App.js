@@ -7,6 +7,11 @@ const App = {
       _onToastEvent: null,
     };
   },
+  computed: {
+    showNavbar() {
+      return !this.$route?.meta?.hideNavbar;
+    },
+  },
   created() {
     window.ppToast = (message, type = "danger", timeoutMs = 4000) => {
       this.pushToast(message, type, timeoutMs);
@@ -42,11 +47,22 @@ const App = {
     },
   },
   template: `
-    <div class="app-layout">
-      <Navbar />
-      <main class="page-content">
+    <div :class="['app-layout', { 'auth-layout': !showNavbar }]">
+      <Navbar v-if="showNavbar" />
+      <main class="page-content" :class="{ 'auth-content': !showNavbar }">
         <router-view />
       </main>
+
+      <footer v-if="showNavbar" class="portal-footer">
+        <div class="portal-footer-inner">
+          <div><strong>Academic Concierge</strong> · © 2026 Placement System</div>
+          <div class="portal-footer-links">
+            <a href="#">Privacy Policy</a>
+            <a href="#">Terms</a>
+            <a href="#">Support</a>
+          </div>
+        </div>
+      </footer>
 
       <div class="pp-toast-stack">
         <div

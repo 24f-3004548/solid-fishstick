@@ -1,7 +1,8 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 from sqlalchemy import text
-from datetime import datetime
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from urllib.parse import urlparse
 import socket
 import subprocess
@@ -9,6 +10,8 @@ import subprocess
 from app.extensions import db, celery
 from app.models import User, Student, Company, PlacementDrive, Application, Notification, AuditLog, JobRun
 from app.utils.audit import log_audit
+from app.utils.job_runs import record_job_run
+from app.utils.datetime_utils import now_ist
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -116,7 +119,7 @@ def dashboard():
             "total_applications":  Application.query.count(),
             "pending_companies":   Company.query.filter_by(approval_status="pending").count(),
             "pending_drives":      PlacementDrive.query.filter_by(status="pending").count(),
-            "selected_students":   Application.query.filter(Application.status.in_(["selected", "hired"])).count(),
+            "selected_students":   Application.query.filter(Application.status.in_(["joined", "selected", "hired"])).count(),
         }
     })
 
@@ -299,7 +302,6 @@ def list_students():
         query = query.filter(
             db.or_(
                 Student.full_name.ilike(f"%{search}%"),
-                Student.roll_number.ilike(f"%{search}%"),
                 Student.branch.ilike(f"%{search}%"),
             )
         )
@@ -550,9 +552,7 @@ def search():
     if not q:
         return _error("Query parameter 'q' is required")
 
-    students  = Student.query.filter(
-        db.or_(Student.full_name.ilike(f"%{q}%"), Student.roll_number.ilike(f"%{q}%"))
-    ).limit(10).all()
+    students  = Student.query.filter(Student.full_name.ilike(f"%{q}%")).limit(10).all()
 
     companies = Company.query.filter(Company.name.ilike(f"%{q}%")).limit(10).all()
     drives    = PlacementDrive.query.filter(PlacementDrive.title.ilike(f"%{q}%")).limit(10).all()
@@ -583,14 +583,29 @@ def reports_summary():
 
     apps_by_status = {
         s: Application.query.filter_by(status=s).count()
-        for s in ("applied", "shortlisted", "offered", "hired", "selected", "rejected", "offer_declined", "waiting")
+        for s in (
+            "applied",
+            "accepted",
+            "interview",
+            "interview_accepted",
+            "offered",
+            "joined",
+            "offer_withdrawn",
+            "void_joined_elsewhere",
+            "rejected",
+            "shortlisted",
+            "waiting",
+            "selected",
+            "hired",
+            "offer_declined",
+        )
     }
 
     top_companies = (
         db.session.query(Company.name, db.func.count(Application.id).label("selected"))
         .join(PlacementDrive, PlacementDrive.company_id == Company.id)
         .join(Application, Application.drive_id == PlacementDrive.id)
-        .filter(Application.status.in_(["selected", "hired"]))
+        .filter(Application.status.in_(["joined", "selected", "hired"]))
         .group_by(Company.id)
         .order_by(db.desc("selected"))
         .limit(5)
@@ -607,6 +622,118 @@ def reports_summary():
             ],
         }
     })
+
+
+@admin_bp.route("/reports/send-instant", methods=["POST"])
+@jwt_required()
+def send_instant_report():
+    """Send an instant admin report via email (not waiting for monthly schedule)"""
+    err = _admin_required()
+    if err: 
+        return err
+
+    try:
+        from flask import current_app
+        from flask_mail import Message
+        from app.jobs.tasks import _render_monthly_report
+
+        now_utc = datetime.utcnow()
+        now_display = now_ist()
+        month_ago = now_utc - timedelta(days=30)
+
+        # Collect stats (same as monthly report)
+        total_drives = PlacementDrive.query.filter(
+            PlacementDrive.created_at >= month_ago
+        ).count()
+
+        total_applications = Application.query.filter(
+            Application.applied_at >= month_ago
+        ).count()
+
+        total_selected = Application.query.filter(
+            Application.applied_at >= month_ago,
+            Application.status.in_(["joined", "selected", "hired"])
+        ).count()
+
+        new_students = Student.query.filter(
+            Student.created_at >= month_ago
+        ).count()
+
+        drives_by_status = {
+            s: PlacementDrive.query.filter_by(status=s).count()
+            for s in ("pending", "approved", "rejected", "closed")
+        }
+
+        apps_by_status = {
+            s: Application.query.filter_by(status=s).count()
+            for s in (
+                "applied",
+                "accepted",
+                "interview",
+                "interview_accepted",
+                "offered",
+                "joined",
+                "offer_withdrawn",
+                "void_joined_elsewhere",
+                "rejected",
+                "shortlisted",
+                "waiting",
+                "selected",
+                "hired",
+                "offer_declined",
+            )
+        }
+
+        # Render HTML
+        html = _render_monthly_report(
+            month=now_display.strftime("%B %Y"),
+            total_drives=total_drives,
+            total_applications=total_applications,
+            total_selected=total_selected,
+            new_students=new_students,
+            drives_by_status=drives_by_status,
+            apps_by_status=apps_by_status,
+            current_date=now_display,
+        )
+
+        # Send email
+        from app.extensions import mail
+        admin_email = current_app.config.get("ADMIN_EMAIL", "hrimansaha.10@gmail.com")
+        msg = Message(
+            subject=f"Placement Portal — Instant Report ({now_display.strftime('%d %b %Y %H:%M IST')})",
+            recipients=[admin_email],
+            html=html,
+        )
+        mail.send(msg)
+
+        # Log to JobRun
+        record_job_run(
+            "admin.send_instant_report",
+            "success",
+            f"Instant report sent to {admin_email}",
+            {"admin_email": admin_email}
+        )
+
+        actor_id = _actor_user_id()
+        log_audit(
+            actor_user_id=actor_id,
+            action="SEND_INSTANT_REPORT",
+            entity_type="system",
+            entity_id=None,
+            details={"admin_email": admin_email}
+        )
+
+        return _ok({"message": f"Report sent to {admin_email}"})
+
+    except Exception as e:
+        error_msg = str(e)
+        record_job_run(
+            "admin.send_instant_report",
+            "error",
+            error_msg,
+            {"error": error_msg}
+        )
+        return _error(f"Failed to send report: {error_msg}", 500)
 
 
 # ==================================================================
@@ -649,7 +776,7 @@ def system_health():
     return _ok({
         "health": {
             "status": overall_status,
-            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "generated_at": datetime.now(ZoneInfo("Asia/Kolkata")).isoformat(),
             "components": components,
             "job_runs": latest_runs,
         }

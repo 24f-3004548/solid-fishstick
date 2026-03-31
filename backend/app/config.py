@@ -37,12 +37,12 @@ class Config:
     MAIL_USERNAME = os.getenv("MAIL_USERNAME", "")
     MAIL_PASSWORD = os.getenv("MAIL_PASSWORD", "")
     MAIL_DEFAULT_SENDER = os.getenv("MAIL_DEFAULT_SENDER", os.getenv("MAIL_USERNAME"))
-    FRONTEND_URL = os.getenv("FRONTEND_URL", "http://127.0.0.1:8080")
+    FRONTEND_URL = os.getenv("FRONTEND_URL", "http://127.0.0.1:5500")
     FRONTEND_URLS = [
         url.strip()
         for url in os.getenv(
             "FRONTEND_URLS",
-            f"{FRONTEND_URL},http://localhost:8080,http://127.0.0.1:8080",
+            f"{FRONTEND_URL},http://localhost:5500,http://127.0.0.1:5500",
         ).split(",")
         if url.strip()
     ]
