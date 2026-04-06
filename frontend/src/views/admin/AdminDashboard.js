@@ -801,7 +801,6 @@ const AdminDashboard = {
       rejectValidation: { submitted: false },
       blacklistValidation: { submitted: false },
       _timers: {},
-      _refreshTimer: null,
       _onWindowFocus: null,
     };
   },
@@ -841,12 +840,10 @@ const AdminDashboard = {
     await this.fetchDashboard();
     this._onWindowFocus = () => this.refreshCurrentView(true);
     window.addEventListener("focus", this._onWindowFocus);
-    this._refreshTimer = setInterval(() => this.refreshCurrentView(true), 30000);
   },
 
   beforeUnmount() {
     Object.values(this._timers).forEach((timer) => clearTimeout(timer));
-    if (this._refreshTimer) clearInterval(this._refreshTimer);
     if (this._onWindowFocus) window.removeEventListener("focus", this._onWindowFocus);
   },
 

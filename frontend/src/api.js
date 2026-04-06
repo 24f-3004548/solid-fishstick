@@ -131,6 +131,7 @@ const ApiService = {
   companyCreateDrive:  (d)      => api.post("/company/drives", d),
   companyUpdateDrive:  (id, d)  => api.put(`/company/drives/${id}`, d),
   companyCloseDrive:   (id)     => api.put(`/company/drives/${id}/close`),
+  companyAllApplications: (q)   => api.get("/company/applications", { params: q }),
   companyApplications: (id, q)  => api.get(`/company/drives/${id}/applications`, { params: q }),
   companyApplication:  (id)     => api.get(`/company/applications/${id}`),
   companyUpdateApp:    (id, d)  => api.put(`/company/applications/${id}/status`, d),

@@ -11,7 +11,6 @@ company_bp = Blueprint("company", __name__)
 
 STATUS_FLOW = {
     "applied",
-    "accepted",
     "interview",
     "interview_accepted",
     "offered",
@@ -29,15 +28,14 @@ LEGACY_STATUS_MAP = {
     "offer_declined": "rejected",
 }
 
-COMPANY_MUTABLE_STATUSES = ("accepted", "interview", "offered", "rejected", "offer_withdrawn")
+COMPANY_MUTABLE_STATUSES = ("interview", "offered", "rejected")
 ALLOWED_TRANSITIONS = {
-    "applied": {"accepted", "rejected"},
+    "applied": {"interview", "rejected"},
     "accepted": {"interview", "rejected"},
-    "interview": {"offered", "rejected"},
+    "interview": {"rejected"},
     "interview_accepted": {"offered", "rejected"},
-    "offered": {"offer_withdrawn"},
+    "offered": set(),
     "rejected": set(),
-    "offer_withdrawn": set(),
     "joined": set(),
     "void_joined_elsewhere": set(),
 }
@@ -142,11 +140,11 @@ def _student_joined_elsewhere(student_id, exclude_app_id=None):
 
 
 def _notification_type_for_status(status):
-    if status in ("accepted", "interview", "interview_accepted", "applied"):
+    if status in ("interview", "interview_accepted", "applied"):
         return "info"
     if status in ("offered", "joined"):
         return "success"
-    if status in ("rejected", "offer_withdrawn", "void_joined_elsewhere"):
+    if status in ("rejected", "void_joined_elsewhere"):
         return "danger"
     return "warning"
 
@@ -434,6 +432,39 @@ def close_drive(drive_id):
 # APPLICATION MANAGEMENT
 # ==================================================================
 
+@company_bp.route("/applications", methods=["GET"])
+@jwt_required()
+def list_all_applications():
+    company, err = _get_company()
+    if err: return err
+
+    status = (request.args.get("status") or "").strip()
+    drive_id_raw = (request.args.get("drive_id") or "").strip()
+    search = (request.args.get("search") or "").strip()
+
+    query = (
+        Application.query
+        .join(PlacementDrive, Application.drive_id == PlacementDrive.id)
+        .join(Student, Application.student_id == Student.id)
+        .filter(PlacementDrive.company_id == company.id)
+    )
+
+    if status:
+        query = query.filter(Application.status == status)
+
+    if drive_id_raw:
+        try:
+            drive_id = int(drive_id_raw)
+        except ValueError:
+            return _error("drive_id must be an integer")
+        query = query.filter(Application.drive_id == drive_id)
+
+    if search:
+        query = query.filter(Student.full_name.ilike(f"%{search}%"))
+
+    apps = query.order_by(Application.applied_at.desc()).all()
+    return _ok({"applications": [a.to_dict() for a in apps]})
+
 @company_bp.route("/drives/<int:drive_id>/applications", methods=["GET"])
 @jwt_required()
 def list_applications(drive_id):
@@ -463,8 +494,19 @@ def get_application(app_id):
         return _error("Application does not belong to your company", 403)
 
     data = app.to_dict()
-    # Include student resume path so company can view it
-    data["resume_path"] = app.student.resume_path if app.student else None
+    if app.student:
+        data["student"] = {
+            "id": app.student.id,
+            "full_name": app.student.full_name,
+            "email": app.student.user.email if app.student.user else None,
+            "phone": app.student.phone,
+            "branch": app.student.branch,
+            "year": app.student.year,
+            "cgpa": app.student.cgpa,
+            "resume_path": app.student.resume_path,
+        }
+    else:
+        data["student"] = None
     return _ok({"application": data})
 
 
@@ -489,29 +531,18 @@ def update_application_status(app_id):
     if new_status not in allowed:
         return _error(f"Cannot change status from '{current_status}' to '{new_status}'")
 
+    if new_status in ("interview", "offered"):
+        joined_elsewhere = _student_joined_elsewhere(app.student_id, exclude_app_id=app.id)
+        if joined_elsewhere:
+            return _error("Student has already accepted another offer and cannot be moved to interview/offered")
+
     if new_status == "offered":
         joined = _student_joined_elsewhere(app.student_id, exclude_app_id=app.id)
         if joined:
             return _error("Student has already accepted another offer and cannot receive new offers")
 
-    if new_status == "offer_withdrawn":
-        withdraw_reason = str(data.get("reason") or data.get("remarks") or "").strip()
-        if len(withdraw_reason) < 5:
-            return _error("A withdrawal reason is required (minimum 5 characters)")
-        app.remarks = withdraw_reason
-
     app.status = new_status
 
-    # Optional interview details (company can set these when shortlisting)
-    if "interview_type" in data:
-        app.interview_type = data["interview_type"]
-    if "interview_date" in data:
-        try:
-            app.interview_date = _parse_iso_datetime(data["interview_date"], "interview_date")
-        except ValueError as exc:
-            return _error(str(exc))
-    if "interview_date" in data and not data.get("interview_date"):
-        app.interview_date = None
     if "offer_letter_url" in data:
         offer_link = str(data.get("offer_letter_url") or "").strip()
         app.remarks = offer_link or app.remarks
@@ -519,13 +550,17 @@ def update_application_status(app_id):
         message = str(data.get("offer_message") or "").strip()
         if message:
             app.remarks = message
-    if "remarks" in data and new_status != "offer_withdrawn":
+    if "remarks" in data:
         app.remarks = data["remarks"]
+
+    status_message = f"Your application for '{app.drive.title}' is now '{new_status}'."
+    if new_status == "interview":
+        status_message = f"You have been called for interview for '{app.drive.title}'."
 
     db.session.add(Notification(
         user_id=app.student.user_id,
         title="Application updated",
-        message=f"Your application for '{app.drive.title}' is now '{new_status}'.",
+        message=status_message,
         type=_notification_type_for_status(new_status),
     ))
     log_audit(
@@ -555,8 +590,8 @@ def send_offer_letter(app_id):
     offer_message = str(data.get("message") or "").strip()
 
     current_status = _normalized_status(app.status)
-    if current_status not in ("interview", "interview_accepted"):
-        return _error("Offer letter can be sent only after interview stage")
+    if current_status != "interview_accepted":
+        return _error("Offer can be sent only after student accepts interview call")
 
     joined = _student_joined_elsewhere(app.student_id, exclude_app_id=app.id)
     if joined:
@@ -628,7 +663,7 @@ def bulk_update_applications(drive_id):
     app_ids    = data.get("application_ids", [])
     new_status = data.get("status", "").strip()
 
-    valid_statuses = ("accepted", "interview", "offered", "rejected")
+    valid_statuses = ("interview", "offered", "rejected")
     if new_status not in valid_statuses:
         return _error(f"Status must be one of: {', '.join(valid_statuses)}")
 
@@ -643,6 +678,11 @@ def bulk_update_applications(drive_id):
             allowed = ALLOWED_TRANSITIONS.get(current_status, set())
             if new_status not in allowed:
                 continue
+
+            if new_status in ("interview", "offered"):
+                joined_elsewhere = _student_joined_elsewhere(app.student_id, exclude_app_id=app.id)
+                if joined_elsewhere:
+                    continue
 
             if new_status == "offered":
                 joined = _student_joined_elsewhere(app.student_id, exclude_app_id=app.id)
@@ -685,7 +725,7 @@ def placement_history():
         .join(PlacementDrive)
         .filter(
             PlacementDrive.company_id == company.id,
-            Application.status == "joined"
+            Application.status.in_(["joined", "selected", "hired"])
         )
         .order_by(Application.updated_at.desc())
         .all()

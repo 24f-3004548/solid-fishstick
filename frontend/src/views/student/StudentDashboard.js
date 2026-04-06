@@ -69,8 +69,8 @@ const StudentDashboard = {
               <div class="student-kpi-value">{{ stats.joined || 0 }}</div>
             </div>
             <div class="student-kpi-card shortlisted">
-              <div class="student-kpi-label">Accepted</div>
-              <div class="student-kpi-value">{{ stats.accepted || 0 }}</div>
+              <div class="student-kpi-label">Interview accepted</div>
+              <div class="student-kpi-value">{{ stats.interview_accepted || 0 }}</div>
             </div>
             <div class="student-kpi-card waiting">
               <div class="student-kpi-label">Interview</div>
@@ -346,7 +346,7 @@ const StudentDashboard = {
             <label class="form-label" for="appStatusFilter">Filter by status</label>
             <select v-model="appStatusFilter" id="appStatusFilter" class="form-select" aria-label="Filter applications by status" @change="fetchApplications">
               <option value="">All statuses</option>
-              <option v-for="s in appStatuses" :key="s" :value="s">{{ s }}</option>
+              <option v-for="s in appStatuses" :key="s" :value="s">{{ formatStatusOptionLabel(s) }}</option>
             </select>
           </div>
           <div class="col-md-8">
@@ -381,26 +381,29 @@ const StudentDashboard = {
                 <div class="fw-500">{{ a.drive_title }}</div>
                 <div class="text-muted" style="font-size:.85rem">{{ a.company_name }}</div>
                 <div class="mt-2 d-flex flex-wrap gap-2">
-                  <span :class="'status-badge '+a.status">{{ a.status }}</span>
+                  <span :class="'status-badge ' + applicationStatusClass(a)">{{ applicationStatusLabel(a) }}</span>
                   <span class="text-muted" style="font-size:.8rem">
                     Applied {{ formatDate(a.applied_at) }}
                   </span>
-                </div>
-                <div v-if="a.interview_date" class="mt-2 text-info" style="font-size:.82rem">
-                  <i class="bi bi-camera-video me-1"></i>
-                  Interview: {{ formatDate(a.interview_date) }} ({{ a.interview_type }})
                 </div>
                 <div v-if="a.remarks" class="mt-1 text-muted" style="font-size:.82rem">
                   <i class="bi bi-chat-left-text me-1"></i>{{ a.remarks }}
                 </div>
               </div>
-              <div class="d-flex flex-column gap-2 align-items-stretch">
+              <div v-if="!isLockedByAcceptedElsewhere(a)" class="d-flex flex-column gap-2 align-items-stretch">
                 <button
                   v-if="a.status==='interview'"
                   class="btn btn-sm btn-outline-primary"
-                  @click="respondToInterview(a)"
+                  @click="respondToInterview(a, 'accept')"
                 >
                   <i class="bi bi-check2-circle me-1" aria-hidden="true"></i>Accept interview
+                </button>
+                <button
+                  v-if="a.status==='interview'"
+                  class="btn btn-sm btn-outline-danger"
+                  @click="respondToInterview(a, 'cancel')"
+                >
+                  <i class="bi bi-x-circle me-1" aria-hidden="true"></i>Cancel application
                 </button>
                 <button
                   v-if="a.status==='offered'"
@@ -414,9 +417,17 @@ const StudentDashboard = {
                   v-if="a.status==='offered'"
                   class="btn btn-sm btn-success"
                   :aria-label="'Accept offer from ' + a.company_name + ' for ' + a.drive_title"
-                  @click="respondToOffer(a)"
+                  @click="respondToOffer(a, 'accept')"
                 >
                   <i class="bi bi-check2-circle me-1" aria-hidden="true"></i>Accept offer
+                </button>
+                <button
+                  v-if="a.status==='offered'"
+                  class="btn btn-sm btn-outline-danger"
+                  :aria-label="'Reject offer from ' + a.company_name + ' for ' + a.drive_title"
+                  @click="respondToOffer(a, 'reject')"
+                >
+                  <i class="bi bi-x-circle me-1" aria-hidden="true"></i>Reject offer
                 </button>
                 <button v-if="a.status==='applied'" class="btn btn-sm btn-outline-danger"
                   :aria-label="'Withdraw application for ' + a.drive_title + ' at ' + a.company_name"
@@ -481,7 +492,6 @@ const StudentDashboard = {
                   <th class="sortable" @click="setSortBy('drive_title')" scope="col">
                     Drive <span class="sort-indicator" v-if="historySortBy==='drive_title'" aria-hidden="true"><i :class="'bi bi-arrow-'+(historySortDir==='asc'?'up':'down')"></i></span>
                   </th>
-                  <th class="sortable" @click="setSortBy('interview_type')" scope="col">Interview</th>
                   <th class="sortable" @click="setSortBy('applied_at')" scope="col">
                     Applied <span class="sort-indicator" v-if="historySortBy==='applied_at'" aria-hidden="true"><i :class="'bi bi-arrow-'+(historySortDir==='asc'?'up':'down')"></i></span>
                   </th>
@@ -495,9 +505,8 @@ const StudentDashboard = {
                   <td class="text-muted" style="width:0;">{{ i+1 }}</td>
                   <td>{{ a.company_name }}</td>
                   <td>{{ a.drive_title }}</td>
-                  <td>{{ a.interview_type || '—' }}</td>
                   <td>{{ formatDate(a.applied_at) }}</td>
-                  <td><span :class="'status-badge '+a.status">{{ a.status }}</span></td>
+                  <td><span :class="'status-badge ' + applicationStatusClass(a)">{{ applicationStatusLabel(a) }}</span></td>
                 </tr>
               </tbody>
             </table>
@@ -607,7 +616,7 @@ const StudentDashboard = {
       eligibleOnly:  false,
       appStatusFilter: "",
       appSearch:     "",
-      appStatuses:   ["applied","accepted","interview","interview_accepted","offered","joined","offer_withdrawn","void_joined_elsewhere","rejected"],
+      appStatuses:   ["applied","interview","interview_accepted","offered","joined","void_joined_elsewhere","rejected"],
       appCurrentPage: 1,
       appPageSize:   10,
       profileForm:   { full_name: "", phone: "", dob: "" },
@@ -618,7 +627,6 @@ const StudentDashboard = {
       alert:         { msg: "", type: "success" },
       _searchTimer:  null,
       _appSearchTimer: null,
-      _refreshTimer: null,
       _onWindowFocus: null,
       historySortBy: 'applied_at',
       historySortDir: 'desc',
@@ -634,7 +642,7 @@ const StudentDashboard = {
     funnelSegments() {
       const rawSegments = [
         { key: "applied", label: "Applied", value: Number(this.stats.total_applied || 0), color: "#1e5da9" },
-        { key: "accepted", label: "Accepted", value: Number(this.stats.accepted || 0), color: "#e09a27" },
+        { key: "interview_accepted", label: "Interview accepted", value: Number(this.stats.interview_accepted || 0), color: "#e09a27" },
         { key: "joined", label: "Joined", value: Number(this.stats.joined || 0), color: "#2f9d6c" },
         { key: "interview", label: "Interview", value: Number(this.stats.interview || 0), color: "#9ca3af" },
       ];
@@ -650,21 +658,22 @@ const StudentDashboard = {
     statCards() {
       return [
         { label: "Applied",     value: this.stats.total_applied, icon: "bi bi-send-fill",      bg: "#eff6ff", color: "#1d4ed8" },
-        { label: "Accepted",    value: this.stats.accepted,      icon: "bi bi-star-fill",      bg: "#fef3c7", color: "#92400e" },
+        { label: "Interview accepted", value: this.stats.interview_accepted, icon: "bi bi-star-fill", bg: "#fef3c7", color: "#92400e" },
         { label: "Joined",      value: this.stats.joined,        icon: "bi bi-trophy-fill",    bg: "#dcfce7", color: "#166534" },
         { label: "Rejected",    value: this.stats.rejected,      icon: "bi bi-x-circle-fill",  bg: "#fee2e2", color: "#991b1b" },
       ];
     },
     historySummary() {
       const h = this.history;
+      const displayStatus = (app) => this.applicationStatusClass(app);
       return [
         { key: "applied",     label: "Total applied",  value: h.length },
-        { key: "offered",     label: "Offered",        value: h.filter(a=>a.status==="offered").length },
-        { key: "joined",      label: "Joined",         value: h.filter(a=>a.status==="joined").length },
-        { key: "void_joined_elsewhere", label: "Voided", value: h.filter(a=>a.status==="void_joined_elsewhere").length },
-        { key: "accepted",    label: "Accepted",       value: h.filter(a=>a.status==="accepted").length },
-        { key: "interview",   label: "Interview",      value: h.filter(a=>a.status==="interview").length },
-        { key: "rejected",    label: "Rejected",       value: h.filter(a=>a.status==="rejected").length },
+        { key: "offered",     label: "Offered",        value: h.filter(a => displayStatus(a) === "offered").length },
+        { key: "joined",      label: "Joined",         value: h.filter(a => displayStatus(a) === "joined").length },
+        { key: "void_joined_elsewhere", label: "Offer accepted elsewhere", value: h.filter(a => displayStatus(a) === "void_joined_elsewhere").length },
+        { key: "interview_accepted", label: "Interview accepted", value: h.filter(a => displayStatus(a) === "interview_accepted").length },
+        { key: "interview",   label: "Interview",      value: h.filter(a => displayStatus(a) === "interview").length },
+        { key: "rejected",    label: "Rejected",       value: h.filter(a => displayStatus(a) === "rejected").length },
       ];
     },
     filteredApplications() {
@@ -706,8 +715,12 @@ const StudentDashboard = {
 
       if (this.historySortBy && this.historySortBy !== '#') {
         sorted.sort((a, b) => {
-          const valA = a[this.historySortBy];
-          const valB = b[this.historySortBy];
+          const valA = this.historySortBy === 'status'
+            ? this.applicationStatusLabel(a)
+            : a[this.historySortBy];
+          const valB = this.historySortBy === 'status'
+            ? this.applicationStatusLabel(b)
+            : b[this.historySortBy];
 
           if (valA == null) return 1;
           if (valB == null) return -1;
@@ -746,13 +759,11 @@ const StudentDashboard = {
     await this.fetchDashboard();
     this._onWindowFocus = () => this.refreshCurrentView(true);
     window.addEventListener("focus", this._onWindowFocus);
-    this._refreshTimer = setInterval(() => this.refreshCurrentView(true), 30000);
   },
 
   beforeUnmount() {
     if (this._searchTimer) clearTimeout(this._searchTimer);
     if (this._appSearchTimer) clearTimeout(this._appSearchTimer);
-    if (this._refreshTimer) clearInterval(this._refreshTimer);
     if (this._onWindowFocus) window.removeEventListener("focus", this._onWindowFocus);
   },
 
@@ -850,7 +861,7 @@ const StudentDashboard = {
       try {
         const params = this.appStatusFilter ? { status: this.appStatusFilter } : {};
         const { data } = await ApiService.studentApplications(params);
-        this.myApplications = data.applications;
+        this.myApplications = (data.applications || []).map((app) => this.normalizeApplicationForUi(app));
         this.appCurrentPage = 1;
       } catch (error) {
         if (!silent) {
@@ -865,7 +876,7 @@ const StudentDashboard = {
       this.loadingHistory = true;
       try {
         const { data } = await ApiService.studentHistory();
-        this.history = data.history;
+        this.history = (data.history || []).map((app) => this.normalizeApplicationForUi(app));
       } catch (error) {
         if (!silent) {
           ppToast("Failed to load history", "danger");
@@ -956,36 +967,42 @@ const StudentDashboard = {
       ppToast(text, "info");
     },
 
-    async respondToOffer(app) {
-      const message = "Are you sure you want to accept this offer? This will lock your placement and void all other active applications.";
+    async respondToOffer(app, decision = "accept") {
+      const message = decision === "accept"
+        ? "Are you sure you want to accept this offer? This will lock your placement and void all other active applications."
+        : "Are you sure you want to reject this offer?";
 
       const confirmed = confirm(message);
       if (!confirmed) return;
 
       try {
-        const { data } = await ApiService.studentOfferResponse(app.id, { decision: "accept" });
-        app.status = data.application?.status || "joined";
+        const { data } = await ApiService.studentOfferResponse(app.id, { decision });
+        app.status = data.application?.status || (decision === "accept" ? "joined" : "rejected");
         app.remarks = data.application?.remarks || app.remarks;
         await this.refreshCurrentView(true);
-        const message = data.message || "Offer accepted successfully";
+        const message = data.message || "Offer response recorded";
         ppToast(message, "success");
       } catch (e) {
-        ppToast(e.response?.data?.message || "Failed to accept offer", "danger");
+        ppToast(e.response?.data?.message || "Failed to update offer response", "danger");
         console.error("Offer response error:", e);
       }
     },
 
-    async respondToInterview(app) {
-      const confirmed = confirm("Accept this interview call?");
+    async respondToInterview(app, decision = "accept") {
+      const confirmed = confirm(
+        decision === "accept"
+          ? "Accept this interview call?"
+          : "Cancel this application after interview call?"
+      );
       if (!confirmed) return;
 
       try {
-        const { data } = await ApiService.studentInterviewResponse(app.id, { decision: "accept" });
-        app.status = data.application?.status || "interview_accepted";
+        const { data } = await ApiService.studentInterviewResponse(app.id, { decision });
+        app.status = data.application?.status || (decision === "accept" ? "interview_accepted" : "rejected");
         await this.refreshCurrentView(true);
-        ppToast(data.message || "Interview accepted", "success");
+        ppToast(data.message || "Interview response recorded", "success");
       } catch (e) {
-        ppToast(e.response?.data?.message || "Failed to accept interview", "danger");
+        ppToast(e.response?.data?.message || "Failed to update interview response", "danger");
       }
     },
 
@@ -1040,6 +1057,52 @@ const StudentDashboard = {
         month: "short",
         year: "numeric",
       });
+    },
+
+    isJoinedStatus(status) {
+      return ["joined", "selected", "hired"].includes(String(status || "").toLowerCase());
+    },
+
+    isLockedByAcceptedElsewhere(app) {
+      return !!this.hasJoinedOffer && !this.isJoinedStatus(app?.status);
+    },
+
+    applicationStatusLabel(app) {
+      if (this.isLockedByAcceptedElsewhere(app)) return "offer accepted elsewhere";
+      return app?.status || "—";
+    },
+
+    applicationStatusClass(app) {
+      if (this.isLockedByAcceptedElsewhere(app)) return "void_joined_elsewhere";
+      return app?.status || "applied";
+    },
+
+    formatStatusOptionLabel(status) {
+      const normalized = String(status || "").toLowerCase();
+      if (normalized === "void_joined_elsewhere") return "offer accepted elsewhere";
+      return String(status || "").replace(/_/g, " ");
+    },
+
+    normalizeApplicationForUi(app) {
+      const item = { ...(app || {}) };
+      item.interview_type = null;
+      item.interview_date = null;
+      item.remarks = this.stripLegacyInterviewRemarks(item.remarks, item.status);
+      return item;
+    },
+
+    stripLegacyInterviewRemarks(remarks, status) {
+      if (!remarks) return "";
+      if (["interview", "interview_accepted"].includes(status)) return "";
+      const lines = String(remarks)
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const filtered = lines.filter((line) => {
+        const lower = line.toLowerCase();
+        return !(lower.startsWith("interview") || lower.includes("interview date") || lower.includes("interview time"));
+      });
+      return filtered.join("\n").trim();
     },
 
     setSortBy(field) {

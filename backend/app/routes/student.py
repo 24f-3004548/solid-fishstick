@@ -21,6 +21,8 @@ LEGACY_STATUS_MAP = {
     "offer_declined": "rejected",
 }
 
+AUTO_REJECTED_ELSEWHERE_MARKER = "[AUTO_REJECTED_ELSEWHERE]"
+
 # ------------------------------------------------------------------ helpers
 
 def _error(msg, code=400):
@@ -66,6 +68,15 @@ def _student_joined_application(student_id, exclude_app_id=None):
     if exclude_app_id:
         query = query.filter(Application.id != exclude_app_id)
     return query.first()
+
+
+def _is_auto_rejected_elsewhere(app):
+    if not app:
+        return False
+    if _normalized_status(app.status) != "rejected":
+        return False
+    remarks = str(app.remarks or "")
+    return AUTO_REJECTED_ELSEWHERE_MARKER in remarks
 
 
 # ==================================================================
@@ -141,7 +152,7 @@ def dashboard():
     student, err = _get_student()
     if err: return err
 
-    apps = student.applications
+    apps = [a for a in student.applications if not _is_auto_rejected_elsewhere(a)]
     has_joined_offer = any(_normalized_status(a.status) == "joined" for a in apps)
     joined_app = next((a for a in apps if _normalized_status(a.status) == "joined"), None)
 
@@ -345,7 +356,7 @@ def list_applications():
     if err: return err
 
     status = request.args.get("status")
-    apps   = student.applications
+    apps   = [a for a in student.applications if not _is_auto_rejected_elsewhere(a)]
 
     if status:
         apps = [a for a in apps if a.status == status]
@@ -378,6 +389,12 @@ def withdraw_application(app_id):
     if app.student_id != student.id:
         return _error("Application not found", 404)
 
+    joined_elsewhere = _student_joined_application(student.id, exclude_app_id=app.id)
+    if joined_elsewhere:
+        return _error(
+            f"You already joined '{joined_elsewhere.drive.title}'. Other applications cannot be modified."
+        )
+
     if app.status != "applied":
         return _error(f"Cannot withdraw — application is already '{app.status}'")
 
@@ -400,7 +417,7 @@ def withdraw_application(app_id):
 @student_bp.route("/applications/<int:app_id>/offer-response", methods=["PUT"])
 @jwt_required()
 def respond_to_offer(app_id):
-    """Student can accept an offered application and lock placement."""
+    """Student can accept or reject an offered application."""
     student, err = _get_student()
     if err: return err
 
@@ -408,15 +425,49 @@ def respond_to_offer(app_id):
     if app.student_id != student.id:
         return _error("Application not found", 404)
 
+    joined_elsewhere = _student_joined_application(student.id, exclude_app_id=app.id)
+    if joined_elsewhere:
+        return _error(
+            f"You already joined '{joined_elsewhere.drive.title}'. Other applications cannot be modified."
+        )
+
     if app.status != "offered":
         return _error(f"Offer response not allowed for status '{app.status}'")
 
     data = request.get_json(silent=True) or {}
     decision = (data.get("decision") or "").strip().lower()
-    if decision != "accept":
-        return _error("Only accepting an offer is allowed")
+    if decision not in ("accept", "reject"):
+        return _error("decision must be one of: accept, reject")
 
     note = (data.get("note") or "").strip()
+
+    if decision == "reject":
+        app.status = "rejected"
+        app.remarks = (f"{app.remarks or ''}\nOffer rejected by student.{(' Note: ' + note) if note else ''}").strip()
+
+        db.session.add(Notification(
+            user_id=student.user_id,
+            title="Offer declined",
+            message=f"You declined the offer for '{app.drive.title}'.",
+            type="info",
+        ))
+        db.session.add(Notification(
+            user_id=app.drive.company.user_id,
+            title="Offer declined by student",
+            message=f"{student.full_name} declined the offer for '{app.drive.title}'.",
+            type="warning",
+        ))
+        log_audit(
+            actor_user_id=_actor_user_id(),
+            action="student.offer_response",
+            entity_type="application",
+            entity_id=app.id,
+            details={"decision": "reject", "drive_id": app.drive_id},
+            ip_address=request.remote_addr,
+        )
+        db.session.commit()
+        return _ok({"message": "Offer rejected", "application": app.to_dict()})
+
     already_joined = _student_joined_application(student.id, exclude_app_id=app.id)
     if already_joined:
         return _error("You have already accepted another offer")
@@ -431,19 +482,19 @@ def respond_to_offer(app_id):
     other_apps = Application.query.filter(
         Application.student_id == student.id,
         Application.id != app.id,
-        Application.status.notin_(["joined", "rejected", "offer_withdrawn", "void_joined_elsewhere"]),
+        Application.status.notin_(["joined", "rejected"]),
     ).all()
     for other in other_apps:
-        other.status = "void_joined_elsewhere"
+        other.status = "rejected"
         other.remarks = (
-            f"{other.remarks or ''}\nApplication voided because student joined '{app.drive.title}'."
+            f"{other.remarks or ''}\n{AUTO_REJECTED_ELSEWHERE_MARKER} Offer accepted elsewhere: student joined '{app.drive.title}'."
         ).strip()
         db.session.add(Notification(
             user_id=other.drive.company.user_id,
-            title="Application voided",
+            title="Offer accepted elsewhere",
             message=(
-                f"{student.full_name} joined another company. "
-                f"Application for '{other.drive.title}' is now void."
+                f"{student.full_name} accepted an offer at another company. "
+                f"Application for '{other.drive.title}' is auto-rejected."
             ),
             type="warning",
         ))
@@ -476,7 +527,7 @@ def respond_to_offer(app_id):
 @student_bp.route("/applications/<int:app_id>/interview-response", methods=["PUT"])
 @jwt_required()
 def respond_to_interview(app_id):
-    """Student can accept interview call."""
+    """Student can accept interview call or cancel application."""
     student, err = _get_student()
     if err: return err
 
@@ -484,8 +535,45 @@ def respond_to_interview(app_id):
     if app.student_id != student.id:
         return _error("Application not found", 404)
 
+    joined_elsewhere = _student_joined_application(student.id, exclude_app_id=app.id)
+    if joined_elsewhere:
+        return _error(
+            f"You already joined '{joined_elsewhere.drive.title}'. Other applications cannot be modified."
+        )
+
     if _normalized_status(app.status) != "interview":
         return _error(f"Interview response not allowed for status '{app.status}'")
+
+    data = request.get_json(silent=True) or {}
+    decision = (data.get("decision") or "").strip().lower()
+    if decision not in ("accept", "cancel"):
+        return _error("decision must be one of: accept, cancel")
+
+    if decision == "cancel":
+        app.status = "rejected"
+        app.remarks = (f"{app.remarks or ''}\nApplication cancelled by student after interview call.").strip()
+        db.session.add(Notification(
+            user_id=student.user_id,
+            title="Application cancelled",
+            message=f"You cancelled your application for '{app.drive.title}'.",
+            type="info",
+        ))
+        db.session.add(Notification(
+            user_id=app.drive.company.user_id,
+            title="Application cancelled by student",
+            message=f"{student.full_name} cancelled the application for '{app.drive.title}'.",
+            type="warning",
+        ))
+        log_audit(
+            actor_user_id=_actor_user_id(),
+            action="student.interview_response",
+            entity_type="application",
+            entity_id=app.id,
+            details={"decision": "cancel", "drive_id": app.drive_id},
+            ip_address=request.remote_addr,
+        )
+        db.session.commit()
+        return _ok({"message": "Application cancelled", "application": app.to_dict()})
 
     app.status = "interview_accepted"
     db.session.add(Notification(
@@ -530,6 +618,7 @@ def placement_history():
         .order_by(Application.applied_at.desc())
         .all()
     )
+    apps = [a for a in apps if not _is_auto_rejected_elsewhere(a)]
 
     return _ok({
         "student":  student.to_dict(),

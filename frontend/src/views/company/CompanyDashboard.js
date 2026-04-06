@@ -216,7 +216,7 @@ const CompanyDashboard = {
         <i class="bi bi-briefcase"></i>No drives found
       </div>
       <div v-else class="d-flex flex-column gap-3">
-        <div v-for="d in drives" :key="d.id" class="pp-card">
+        <div v-for="d in sortedDrives" :key="d.id" class="pp-card">
           <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
             <div>
               <div class="d-flex align-items-center gap-2 flex-wrap">
@@ -263,84 +263,73 @@ const CompanyDashboard = {
       </div>
     </div>
 
-    <!-- ── TAB: Applications (for selected drive) ──────────── -->
+    <!-- ── TAB: Applications ───────────────────────────────── -->
     <div v-if="activeTab==='applications'">
       <div class="d-flex align-items-center gap-2 mb-3">
-        <button class="btn btn-sm btn-outline-secondary" @click="goToTab('drives')">
-          <i class="bi bi-arrow-left me-1"></i>Back
-        </button>
-        <h6 class="mb-0 fw-600">{{ selectedDrive?.title }} — Applications</h6>
-        <span :class="'status-badge '+selectedDrive?.status">{{ selectedDrive?.status }}</span>
+        <h6 class="mb-0 fw-600">Applications</h6>
       </div>
 
       <div class="pp-card mb-3">
         <div class="row g-2 align-items-end">
           <div class="col-md-4">
+            <label class="form-label">Filter by drive</label>
+            <select v-model="appDriveFilter" class="form-select" @change="fetchApplications">
+              <option value="">All drives</option>
+              <option v-for="d in appDriveOptions" :key="'drive_filter_' + d.id" :value="String(d.id)">
+                {{ d.title }}
+              </option>
+            </select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Filter by status</label>
             <select v-model="appStatusFilter" class="form-select" @change="fetchApplications">
               <option value="">All statuses</option>
               <option v-for="s in appStatuses" :key="s" :value="s">{{ s }}</option>
             </select>
           </div>
-          <div class="col-md-8 text-end" v-if="selectedApps.length > 0">
-            <div class="d-inline-flex gap-2 align-items-center">
-              <select v-model="bulkStatus" class="form-select form-select-sm" style="width:150px">
-                <option value="">Bulk update...</option>
-                <option v-for="s in appStatuses" :key="s" :value="s">{{ s }}</option>
-              </select>
-              <button class="btn btn-sm btn-primary" @click="bulkUpdate"
-                :disabled="!bulkStatus || selectedApps.length===0">
-                Apply to {{ selectedApps.length }} selected
-              </button>
+          <div class="col-md-5">
+            <label class="form-label">Search by student name</label>
+            <div class="input-group">
+              <span class="input-group-text"><i class="bi bi-search"></i></span>
+              <input v-model="appSearch" class="form-control" placeholder="Student name..." @input="debouncedApplicationSearch" />
             </div>
           </div>
         </div>
       </div>
 
       <div v-if="loadingApps" class="pp-spinner"><div class="spinner-border text-primary"></div></div>
-      <div v-else-if="applications.length===0" class="empty-state pp-card">
-        <i class="bi bi-inbox"></i>No applications yet for this drive
+      <div v-else-if="groupedApplications.length===0" class="empty-state pp-card">
+        <i class="bi bi-inbox"></i>No applications found
       </div>
-      <div v-else class="d-flex flex-column gap-3">
-        <div v-for="a in applications" :key="a.id" class="pp-card">
-          <div class="d-flex align-items-start gap-3 flex-wrap">
-            <!-- Checkbox for bulk -->
-            <input type="checkbox" class="form-check-input mt-1 flex-shrink-0"
-              :value="a.id" v-model="selectedApps"/>
+      <div v-else class="d-flex flex-column gap-4">
+        <div v-for="group in groupedApplications" :key="'status_group_' + group.status">
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <h6 class="mb-0 fw-600">{{ formatStatusLabel(group.status) }}</h6>
+            <span class="badge bg-light text-dark border">{{ group.items.length }}</span>
+          </div>
+          <div class="d-flex flex-column gap-3">
+            <div v-for="a in group.items" :key="a.id" class="pp-card">
+              <div class="d-flex align-items-start gap-3 flex-wrap">
+                <div class="flex-grow-1">
+                  <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <span class="fw-500">{{ a.student_name }}</span>
+                    <span :class="'status-badge '+a.status">{{ formatStatusLabel(a.status) }}</span>
+                  </div>
+                  <div class="text-muted" style="font-size:.82rem">{{ a.drive_title }}</div>
+                  <div class="text-muted mt-1" style="font-size:.83rem">
+                    Applied {{ formatDate(a.applied_at) }}
+                  </div>
+                  <div v-if="a.remarks" class="mt-1 text-muted" style="font-size:.82rem">
+                    <i class="bi bi-chat-left-text me-1"></i>{{ a.remarks }}
+                  </div>
+                </div>
 
-            <div class="flex-grow-1">
-              <div class="d-flex align-items-center gap-2 flex-wrap">
-                <span class="fw-500">{{ a.student_name }}</span>
-                <span :class="'status-badge '+a.status">{{ a.status }}</span>
+                <div class="d-flex gap-2 align-items-center flex-shrink-0 flex-wrap">
+                  <button class="btn btn-sm btn-outline-primary" @click="openApplicationReview(a)">
+                    <i class="bi bi-eye me-1"></i>Review
+                  </button>
+                </div>
               </div>
-              <div class="text-muted mt-1" style="font-size:.83rem">
-                Applied {{ formatDate(a.applied_at) }}
-                <span v-if="a.interview_date" class="ms-3">
-                  <i class="bi bi-camera-video me-1"></i>
-                  Interview: {{ formatDate(a.interview_date) }}
-                </span>
-              </div>
-              <div v-if="a.remarks" class="mt-1 text-muted" style="font-size:.82rem">
-                <i class="bi bi-chat-left-text me-1"></i>{{ a.remarks }}
-              </div>
-            </div>
-
-            <!-- Per-application update -->
-            <div class="d-flex gap-2 align-items-center flex-shrink-0 flex-wrap">
-              <select class="form-select form-select-sm" style="width:140px"
-                :value="a.status" @change="e => updateAppStatus(a, e.target.value)">
-                <option v-for="s in appStatuses" :key="s" :value="s">{{ s }}</option>
-              </select>
-              <button
-                v-if="['interview','interview_accepted'].includes(a.status)"
-                class="btn btn-sm btn-outline-success"
-                @click="sendOfferLetter(a)"
-              >
-                <i class="bi bi-envelope-paper me-1"></i>Offer
-              </button>
-              <button class="btn btn-sm btn-outline-secondary"
-                @click="openScheduleModal(a)">
-                <i class="bi bi-calendar-event"></i>
-              </button>
             </div>
           </div>
         </div>
@@ -366,13 +355,12 @@ const CompanyDashboard = {
         <div v-else class="pp-card">
           <table class="pp-table">
             <thead>
-              <tr><th>Student</th><th>Drive</th><th>Interview</th><th>Joined on</th></tr>
+              <tr><th>Student</th><th>Drive</th><th>Joined on</th></tr>
             </thead>
             <tbody>
               <tr v-for="a in history" :key="a.id">
                 <td class="fw-500">{{ a.student_name }}</td>
                 <td>{{ a.drive_title }}</td>
-                <td>{{ a.interview_type || '—' }}</td>
                 <td style="font-size:.85rem">{{ formatDate(a.updated_at || a.applied_at) }}</td>
               </tr>
             </tbody>
@@ -512,30 +500,82 @@ const CompanyDashboard = {
       </div>
     </div>
 
-    <!-- ── Schedule Interview Modal ────────────────────────── -->
-    <div v-if="scheduleModal.show"
+    <!-- ── Application Review Modal ────────────────────────── -->
+    <div v-if="applicationReviewModal.show"
       style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1050;
              display:flex;align-items:center;justify-content:center;padding:1rem">
-      <div class="pp-card" style="width:100%;max-width:420px">
-        <h6 class="fw-600 mb-3">Schedule interview — {{ scheduleModal.app?.student_name }}</h6>
-        <div class="mb-3">
-          <label class="form-label">Interview type</label>
-          <select v-model="scheduleForm.interview_type" class="form-select">
-            <option value="in-person">In-person</option>
-            <option value="online">Online</option>
-          </select>
+      <div class="pp-card" style="width:100%;max-width:620px">
+        <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+          <div>
+            <h6 class="fw-600 mb-1">Application Review</h6>
+            <div class="text-muted" style="font-size:.85rem;">
+              {{ applicationReviewModal.application?.drive_title || selectedDrive?.title }}
+            </div>
+          </div>
+          <span :class="'status-badge '+(applicationReviewModal.application?.status || 'applied')">
+            {{ applicationReviewModal.application?.status || 'applied' }}
+          </span>
         </div>
-        <div class="mb-3">
-          <label class="form-label">Interview date & time</label>
-          <input v-model="scheduleForm.interview_date" type="datetime-local" class="form-control"/>
+
+        <div v-if="applicationReviewModal.loading" class="pp-spinner"><div class="spinner-border spinner-border-sm"></div></div>
+        <div v-else>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Student</div>
+              <div class="fw-500">{{ applicationReviewModal.student?.full_name || applicationReviewModal.application?.student_name || '—' }}</div>
+            </div>
+            <div class="col-md-6">
+              <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Email</div>
+              <div class="fw-500">{{ applicationReviewModal.student?.email || '—' }}</div>
+            </div>
+            <div class="col-md-4">
+              <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Phone</div>
+              <div class="fw-500">{{ applicationReviewModal.student?.phone || '—' }}</div>
+            </div>
+            <div class="col-md-4">
+              <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Branch</div>
+              <div class="fw-500">{{ applicationReviewModal.student?.branch || '—' }}</div>
+            </div>
+            <div class="col-md-2">
+              <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Year</div>
+              <div class="fw-500">{{ applicationReviewModal.student?.year || '—' }}</div>
+            </div>
+            <div class="col-md-2">
+              <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">CGPA</div>
+              <div class="fw-500">{{ applicationReviewModal.student?.cgpa ?? '—' }}</div>
+            </div>
+            <div class="col-12" v-if="applicationReviewModal.student?.resume_path">
+              <a class="btn btn-sm btn-outline-secondary" :href="'/uploads/' + applicationReviewModal.student.resume_path" target="_blank" rel="noopener noreferrer">
+                <i class="bi bi-file-earmark-pdf me-1"></i>View resume
+              </a>
+            </div>
+          </div>
+
+          <div v-if="applicationReviewModal.application?.status === 'interview'" class="pp-alert alert-info mt-3 mb-0">
+            Waiting for student response to interview call.
+          </div>
         </div>
-        <div class="mb-4">
-          <label class="form-label">Remarks</label>
-          <input v-model="scheduleForm.remarks" class="form-control" placeholder="Any notes..."/>
-        </div>
-        <div class="d-flex gap-2 justify-content-end">
-          <button class="btn btn-outline-secondary" @click="scheduleModal.show=false">Cancel</button>
-          <button class="btn btn-primary" @click="saveSchedule">Save</button>
+
+        <div class="d-flex gap-2 justify-content-end mt-4 flex-wrap">
+          <button class="btn btn-outline-secondary" @click="closeApplicationReview">Close</button>
+          <button
+            v-if="applicationReviewModal.application?.status === 'applied'"
+            class="btn btn-outline-primary"
+            @click="markApplicationInterview">
+            <i class="bi bi-telephone me-1"></i>Call for interview
+          </button>
+          <button
+            v-if="['applied','interview','interview_accepted'].includes(applicationReviewModal.application?.status)"
+            class="btn btn-outline-danger"
+            @click="markApplicationRejected">
+            <i class="bi bi-x-circle me-1"></i>Reject
+          </button>
+          <button
+            v-if="applicationReviewModal.application?.status === 'interview_accepted'"
+            class="btn btn-success"
+            @click="markApplicationOffered">
+            <i class="bi bi-check2-circle me-1"></i>Offer
+          </button>
         </div>
       </div>
     </div>
@@ -559,29 +599,29 @@ const CompanyDashboard = {
       diversityBreakdown: [],
       recentDrives:  [],
       drives:        [],
+      appDriveOptions: [],
       applications:  [],
       history:       [],
       selectedDrive: null,
-      selectedApps:  [],
-      bulkStatus:    "",
       loadingDash:   true,
       loadingDrives: false,
       loadingApps:   false,
       loadingHistory:false,
       savingProfile: false,
       savingDrive:   false,
-      _refreshTimer: null,
       _onWindowFocus: null,
+      _appSearchTimer: null,
       driveValidation: { submitted: false },
       driveStatusFilter: "",
+      appDriveFilter: "",
       appStatusFilter:   "",
-      appStatuses: ["applied","accepted","interview","interview_accepted","offered","joined","offer_withdrawn","void_joined_elsewhere","rejected"],
+      appStatuses: ["applied","interview","interview_accepted","offered","joined","void_joined_elsewhere","rejected"],
+      appSearch: "",
       profileForm: { description:"", website:"", industry:"", location:"", hr_name:"", hr_email:"", hr_phone:"" },
       driveForm:   { title:"", description:"", job_type:"", location:"", salary_lpa:"", min_cgpa:0,
                      eligible_branches:"", eligible_years:"", application_deadline:"", drive_date:"" },
       driveModal:    { show: false, editing: false, driveId: null },
-      scheduleModal: { show: false, app: null },
-      scheduleForm:  { interview_type: "in-person", interview_date: "", remarks: "" },
+      applicationReviewModal: { show: false, loading: false, application: null, student: null },
       hoveredDiversity: null,
       alert: { msg: "", type: "success" },
     };
@@ -599,6 +639,44 @@ const CompanyDashboard = {
   },
 
   computed: {
+    groupedApplications() {
+      if (!Array.isArray(this.applications) || this.applications.length === 0) return [];
+      const order = this.appStatuses;
+      const groups = new Map();
+      this.applications.forEach((app) => {
+        const status = String(app?.status || "applied");
+        if (!groups.has(status)) groups.set(status, []);
+        groups.get(status).push(app);
+      });
+
+      const orderedStatuses = [
+        ...order.filter((status) => groups.has(status)),
+        ...Array.from(groups.keys()).filter((status) => !order.includes(status)),
+      ];
+
+      return orderedStatuses.map((status) => ({
+        status,
+        items: groups.get(status) || [],
+      }));
+    },
+
+    sortedDrives() {
+      const statusPriority = {
+        open: 0,
+        approved: 0,
+        pending: 1,
+        closed: 2,
+      };
+      const list = Array.isArray(this.drives) ? [...this.drives] : [];
+      return list.sort((a, b) => {
+        const left = String(a?.status || "").toLowerCase();
+        const right = String(b?.status || "").toLowerCase();
+        const leftRank = Object.prototype.hasOwnProperty.call(statusPriority, left) ? statusPriority[left] : 99;
+        const rightRank = Object.prototype.hasOwnProperty.call(statusPriority, right) ? statusPriority[right] : 99;
+        return leftRank - rightRank;
+      });
+    },
+
     diversitySegments() {
       const palette = ["#003f87", "#983c00", "#5f6b73", "#1b8752", "#7a3e00", "#0056b3", "#7b1fa2", "#455a64"];
       const safe = Array.isArray(this.diversityBreakdown) ? this.diversityBreakdown : [];
@@ -663,13 +741,13 @@ const CompanyDashboard = {
 
   async mounted() {
     await this.fetchDashboard();
+    await this.fetchDriveOptions(true);
     this._onWindowFocus = () => this.refreshCurrentView(true);
     window.addEventListener("focus", this._onWindowFocus);
-    this._refreshTimer = setInterval(() => this.refreshCurrentView(true), 30000);
   },
 
   beforeUnmount() {
-    if (this._refreshTimer) clearInterval(this._refreshTimer);
+    if (this._appSearchTimer) clearTimeout(this._appSearchTimer);
     if (this._onWindowFocus) window.removeEventListener("focus", this._onWindowFocus);
   },
 
@@ -746,14 +824,27 @@ const CompanyDashboard = {
       finally  { this.loadingDrives = false; }
     },
 
-    async fetchApplications(silent = false) {
-      if (!this.selectedDrive) return;
-      this.loadingApps = true;
-      this.selectedApps = [];
+    async fetchDriveOptions(silent = false) {
       try {
-        const params = this.appStatusFilter ? { status: this.appStatusFilter } : {};
-        const { data } = await ApiService.companyApplications(this.selectedDrive.id, params);
-        this.applications = data.applications;
+        const { data } = await ApiService.companyDrives({});
+        this.appDriveOptions = data.drives || [];
+      } catch {
+        if (!silent) this.showAlert("Failed to load drives", "danger");
+      }
+    },
+
+    async fetchApplications(silent = false) {
+      this.loadingApps = true;
+      try {
+        if (!this.appDriveOptions.length) {
+          await this.fetchDriveOptions(true);
+        }
+        const params = {};
+        if (this.appStatusFilter) params.status = this.appStatusFilter;
+        if (this.appDriveFilter) params.drive_id = this.appDriveFilter;
+        if (this.appSearch) params.search = this.appSearch;
+        const { data } = await ApiService.companyAllApplications(params);
+        this.applications = (data.applications || []).map((app) => this.normalizeApplicationForUi(app));
       } catch {
         if (!silent) this.showAlert("Failed to load applications", "danger");
       }
@@ -764,7 +855,7 @@ const CompanyDashboard = {
       this.loadingHistory = true;
       try {
         const { data } = await ApiService.companyHistory();
-        this.history = data.history;
+        this.history = (data.history || []).map((app) => this.normalizeApplicationForUi(app));
       } catch {
         if (!silent) this.showAlert("Failed to load history", "danger");
       }
@@ -774,8 +865,15 @@ const CompanyDashboard = {
     viewDrive(drive) {
       this.selectedDrive = drive;
       this.appStatusFilter = "";
+      this.appSearch = "";
+      this.appDriveFilter = String(drive.id);
       this.goToTab("applications");
       this.fetchApplications();
+    },
+
+    debouncedApplicationSearch() {
+      if (this._appSearchTimer) clearTimeout(this._appSearchTimer);
+      this._appSearchTimer = setTimeout(() => this.fetchApplications(true), 300);
     },
 
     // ── Drive CRUD ──
@@ -864,16 +962,59 @@ const CompanyDashboard = {
     },
 
     // ── Application actions ──
-    async updateAppStatus(app, status) {
+    async openApplicationReview(app) {
+      this.applicationReviewModal = {
+        show: true,
+        loading: true,
+        application: { ...app },
+        student: null,
+      };
       try {
-        await ApiService.companyUpdateApp(app.id, { status });
-        app.status = status;
-        await this.refreshCurrentView(true);
-        this.showAlert(`Status updated to "${status}"`, "success");
-      } catch (e) { this.showAlert(e.response?.data?.message || "Failed", "danger"); }
+        const { data } = await ApiService.companyApplication(app.id);
+        const application = this.normalizeApplicationForUi(data.application || { ...app });
+        this.applicationReviewModal.application = application;
+        this.applicationReviewModal.student = application.student || null;
+      } catch (e) {
+        this.showAlert(e.response?.data?.message || "Failed to load application details", "danger");
+      } finally {
+        this.applicationReviewModal.loading = false;
+      }
     },
 
-    async sendOfferLetter(app) {
+    closeApplicationReview() {
+      this.applicationReviewModal = { show: false, loading: false, application: null, student: null };
+    },
+
+    async markApplicationInterview() {
+      const app = this.applicationReviewModal.application;
+      if (!app) return;
+      try {
+        await ApiService.companyUpdateApp(app.id, { status: "interview" });
+        await this.fetchApplications(true);
+        await this.openApplicationReview(app);
+        this.showAlert("Interview call sent to student", "success");
+      } catch (e) {
+        this.showAlert(e.response?.data?.message || "Failed", "danger");
+      }
+    },
+
+    async markApplicationRejected() {
+      const app = this.applicationReviewModal.application;
+      if (!app) return;
+      if (!confirm(`Reject ${app.student_name || "this candidate"}?`)) return;
+      try {
+        await ApiService.companyUpdateApp(app.id, { status: "rejected" });
+        await this.fetchApplications(true);
+        await this.openApplicationReview(app);
+        this.showAlert("Application rejected", "success");
+      } catch (e) {
+        this.showAlert(e.response?.data?.message || "Failed", "danger");
+      }
+    },
+
+    async markApplicationOffered() {
+      const app = this.applicationReviewModal.application;
+      if (!app) return;
       const offerLetterUrl = prompt("Enter offer letter URL (PDF/Drive link):");
       if (!offerLetterUrl) return;
       const note = prompt("Optional message for candidate:") || "";
@@ -882,59 +1023,12 @@ const CompanyDashboard = {
           offer_letter_url: offerLetterUrl,
           message: note,
         });
-        app.status = "offered";
-        app.remarks = offerLetterUrl;
-        await this.refreshCurrentView(true);
-        this.showAlert("Offer letter sent and status updated to offered", "success");
+        await this.fetchApplications(true);
+        await this.openApplicationReview(app);
+        this.showAlert("Offer sent to student", "success");
       } catch (e) {
-        this.showAlert(e.response?.data?.message || "Failed to send offer letter", "danger");
+        this.showAlert(e.response?.data?.message || "Failed to send offer", "danger");
       }
-    },
-
-    async bulkUpdate() {
-      if (!this.bulkStatus || this.selectedApps.length === 0) return;
-      try {
-        await ApiService.companyBulkUpdate(this.selectedDrive.id, {
-          application_ids: this.selectedApps,
-          status: this.bulkStatus,
-        });
-        this.applications.forEach(a => {
-          if (this.selectedApps.includes(a.id)) a.status = this.bulkStatus;
-        });
-        this.selectedApps = [];
-        this.bulkStatus   = "";
-        await this.refreshCurrentView(true);
-        this.showAlert("Bulk update applied", "success");
-      } catch (e) { this.showAlert(e.response?.data?.message || "Failed", "danger"); }
-    },
-
-    openScheduleModal(app) {
-      this.scheduleModal = { show: true, app };
-      this.scheduleForm  = { interview_type: "in-person", interview_date: "", remarks: "" };
-    },
-
-    async saveSchedule() {
-      const app = this.scheduleModal.app;
-      const interviewDateIso = this.scheduleForm.interview_date
-        ? this.istLocalToUtcIso(this.scheduleForm.interview_date)
-        : undefined;
-      if (this.scheduleForm.interview_date && !interviewDateIso) {
-        return this.showAlert("Invalid interview date format", "danger");
-      }
-
-      const payload = {
-        status:         "interview",
-        interview_type: this.scheduleForm.interview_type,
-        interview_date: interviewDateIso,
-        remarks:        this.scheduleForm.remarks,
-      };
-      try {
-        await ApiService.companyUpdateApp(app.id, payload);
-        Object.assign(app, payload);
-        this.scheduleModal.show = false;
-        await this.refreshCurrentView(true);
-        this.showAlert("Interview scheduled", "success");
-      } catch (e) { this.showAlert(e.response?.data?.message || "Failed", "danger"); }
     },
 
     async saveProfile() {
@@ -957,9 +1051,35 @@ const CompanyDashboard = {
       });
     },
 
+    normalizeApplicationForUi(app) {
+      const item = { ...(app || {}) };
+      item.interview_type = null;
+      item.interview_date = null;
+      item.remarks = this.stripLegacyInterviewRemarks(item.remarks, item.status);
+      return item;
+    },
+
+    stripLegacyInterviewRemarks(remarks, status) {
+      if (!remarks) return "";
+      if (["interview", "interview_accepted"].includes(status)) return "";
+      const lines = String(remarks)
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const filtered = lines.filter((line) => {
+        const lower = line.toLowerCase();
+        if (line.includes("[AUTO_REJECTED_ELSEWHERE]")) return false;
+        return !(lower.startsWith("interview") || lower.includes("interview date") || lower.includes("interview time"));
+      });
+      return filtered.join("\n").trim();
+    },
+
     formatStatusLabel(status) {
       if (!status) return "Pending";
-      return status.charAt(0).toUpperCase() + status.slice(1);
+      return String(status)
+        .split("_")
+        .map((part) => part ? part.charAt(0).toUpperCase() + part.slice(1) : "")
+        .join(" ");
     },
 
     formatIstDateTimeLocal(dt) {
