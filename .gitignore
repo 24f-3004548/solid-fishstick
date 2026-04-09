@@ -2,6 +2,16 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyo
+*.pyd
+
+# Python env/version managers
+.python-version
+
+# Python tooling caches
+.ipynb_checkpoints/
+.tox/
+.nox/
 
 # Virtual environments
 venv/
@@ -43,6 +53,24 @@ backend/uploads/
 
 # Frontend runtime artifacts
 frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+
+# Package manager logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local runtime/process files
+*.pid
+*.pid.lock
+*.out
+*.err
+*.seed
+dump.rdb
+.logs/
 
 # Logs
 *.log
