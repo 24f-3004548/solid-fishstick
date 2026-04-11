@@ -63,7 +63,7 @@ kill_by_pattern() {
   kill_pids "$label" "${pids[@]:-}"
 }
 
-echo "Stopping placement portal services..."
+echo "Stopping CareerSync services..."
 
 kill_by_pattern "celery worker" "celery -A celery_worker\.celery worker"
 kill_by_pattern "celery beat" "celery -A celery_worker\.celery beat"
@@ -73,7 +73,7 @@ kill_by_port "frontend" "$FRONTEND_PORT"
 kill_by_port "redis" "$REDIS_PORT"
 
 if [[ "$killed_any" -eq 0 ]]; then
-  echo "No matching placement portal services were running."
+  echo "No matching CareerSync services were running."
 else
-  echo "Placement portal services stopped."
+  echo "CareerSync services stopped."
 fi

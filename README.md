@@ -1,4 +1,4 @@
-# Placement Portal
+# CareerSync
 
 A full-stack campus placement management system with role-based dashboards for students, companies, and admins.
 
@@ -103,13 +103,13 @@ source ~/.zshrc
 After that, run everything with:
 
 ```bash
-portal-up
+careersync-up
 ```
 
-Stop all placement portal services with:
+Stop all CareerSync services with:
 
 ```bash
-portal-down
+careersync-down
 ```
 
 ## Local URLs and Ports

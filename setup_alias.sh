@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ZSHRC="$HOME/.zshrc"
-ALIAS_UP="alias portal-up='cd \"$ROOT_DIR\" && ./start_all.sh'"
-ALIAS_DOWN="alias portal-down='cd \"$ROOT_DIR\" && ./stop_all.sh'"
+ALIAS_UP="alias careersync-up='cd \"$ROOT_DIR\" && ./start_all.sh'"
+ALIAS_DOWN="alias careersync-down='cd \"$ROOT_DIR\" && ./stop_all.sh'"
 
 if [[ ! -f "$ZSHRC" ]]; then
   touch "$ZSHRC"
@@ -15,7 +15,7 @@ added=0
 if ! grep -Fq "$ALIAS_UP" "$ZSHRC"; then
   {
     echo ""
-    echo "# Placement Portal"
+    echo "# CareerSync"
     echo "$ALIAS_UP"
   } >> "$ZSHRC"
   added=1
@@ -33,4 +33,4 @@ else
 fi
 
 echo "Run: source ~/.zshrc"
-echo "Then use: portal-up (start) / portal-down (stop)"
+echo "Then use: careersync-up (start) / careersync-down (stop)"

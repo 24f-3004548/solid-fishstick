@@ -6,7 +6,7 @@ const Navbar = {
           <div class="d-flex align-items-center gap-4">
             <router-link class="navbar-brand d-flex align-items-center gap-2" to="/">
               <span class="brand-mark"><i class="bi bi-mortarboard-fill"></i></span>
-              <span>Academic Concierge</span>
+              <span>CareerSync</span>
             </router-link>
           </div>
 

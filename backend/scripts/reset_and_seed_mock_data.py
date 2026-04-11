@@ -6,8 +6,8 @@ from dotenv import load_dotenv
 from werkzeug.security import generate_password_hash
 
 from app import create_app
-from app.extensions import db
-from app.models import User, Student, Company, PlacementDrive, Application, Notification
+from extensions import db
+from models import User, Student, Company, PlacementDrive, Application, Notification
 
 
 BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -19,6 +19,7 @@ def seed_users_and_profiles():
 
     target_students = int(os.getenv("SEED_STUDENT_COUNT", "1000"))
     target_companies = int(os.getenv("SEED_COMPANY_COUNT", "15"))
+    min_eligible_drives_per_student = int(os.getenv("SEED_MIN_ELIGIBLE_DRIVES_PER_STUDENT", "2"))
 
     admin_email = os.getenv("ADMIN_EMAIL", "admin@placement.com").strip().lower()
     admin_password = os.getenv("ADMIN_PASSWORD", "Admin@1234")
@@ -66,13 +67,16 @@ def seed_users_and_profiles():
     ]
     job_types = ["full-time", "internship"]
 
+    first_company_email = os.getenv("SEED_FIRST_COMPANY_EMAIL", "m2024bsass011@stud.tiss.ac.in").strip().lower()
+    first_student_email = os.getenv("SEED_FIRST_STUDENT_EMAIL", "saha.hriman06@gmail.com").strip().lower()
+
     company_users = []
     companies = []
 
     selected_company_names = company_names[:target_companies]
     for i, company_name in enumerate(selected_company_names):
         slug = company_name.lower().replace(" ", "")
-        email = f"hr{str(i + 1).zfill(2)}@{slug}.com"
+        email = first_company_email if i == 0 else f"hr{str(i + 1).zfill(2)}@{slug}.com"
 
         user = User(
             email=email,
@@ -87,7 +91,7 @@ def seed_users_and_profiles():
 
     for i in range(target_students):
         student_idx = i + 1
-        email = f"student{student_idx:04d}@test.com"
+        email = first_student_email if i == 0 else f"student{student_idx:04d}@test.com"
         user = User(
             email=email,
             password_hash=generate_password_hash(student_password),
@@ -208,6 +212,37 @@ def seed_users_and_profiles():
                     rejection_reason=rejection_reason,
                 )
             )
+
+    # Ensure every student has at least N approved open drives they are eligible for.
+    # These are broad-eligibility campus opportunities across all branches/years.
+    if min_eligible_drives_per_student > 0:
+        if not approved_companies and companies:
+            companies[0].approval_status = "approved"
+            companies[0].rejection_reason = None
+            approved_companies = [companies[0]]
+
+        if approved_companies:
+            for i in range(min_eligible_drives_per_student):
+                company = approved_companies[i % len(approved_companies)]
+                application_deadline = now + timedelta(days=45 + i)
+                drive_date = application_deadline + timedelta(days=10)
+                drives.append(
+                    PlacementDrive(
+                        company_id=company.id,
+                        title=f"Open Campus Opportunity {i + 1}",
+                        description="General campus hiring drive open to all seeded student profiles.",
+                        job_type="full-time",
+                        location="Remote",
+                        salary_lpa=round(random.uniform(5.0, 15.0), 1),
+                        eligible_branches=",".join(branches),
+                        min_cgpa=0.0,
+                        eligible_years="2,3,4",
+                        application_deadline=application_deadline,
+                        drive_date=drive_date,
+                        status="approved",
+                        rejection_reason=None,
+                    )
+                )
 
     db.session.add_all(drives)
     db.session.flush()

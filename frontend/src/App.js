@@ -55,11 +55,11 @@ const App = {
 
       <footer v-if="showNavbar" class="portal-footer">
         <div class="portal-footer-inner">
-          <div><strong>Academic Concierge</strong> · © 2026 Placement System</div>
+          <div><strong>CareerSync</strong> · © 2026 Placement System</div>
           <div class="portal-footer-links">
             <a href="#">Privacy Policy</a>
             <a href="#">Terms</a>
-            <a href="#">Support</a>
+            <a href="mailto:careersync2026@gmail.com">Support</a>
           </div>
         </div>
       </footer>

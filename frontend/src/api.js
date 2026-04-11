@@ -116,6 +116,7 @@ const ApiService = {
   adminRejectDrive:    (id, d)  => api.put(`/admin/drives/${id}/reject`, d),
   adminCloseDrive:     (id)     => api.put(`/admin/drives/${id}/close`),
   adminApplications:   (q)      => api.get("/admin/applications", { params: q }),
+  adminApplication:    (id)     => api.get(`/admin/applications/${id}`),
   adminSearch:         (q)      => api.get("/admin/search", { params: { q } }),
   adminReport:         ()       => api.get("/admin/reports/summary"),
   adminSendInstantReport: ()    => api.post("/admin/reports/send-instant"),
@@ -159,4 +160,5 @@ const ApiService = {
   studentWithdraw:     (id)     => api.delete(`/student/applications/${id}/withdraw`),
   studentHistory:      ()       => api.get("/student/history"),
   studentExport:       ()       => api.get("/student/applications/export"),
+  studentAskAi:        (d)      => api.post("/student/ai/chat", d),
 };
