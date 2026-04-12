@@ -128,6 +128,12 @@ Default ports:
 
 Backend environment file is expected at `backend/.env`.
 
+Setup for collaborators/reviewers:
+
+```bash
+cp backend/.env.example backend/.env
+```
+
 Required keys:
 
 - `SECRET_KEY`
@@ -162,3 +168,10 @@ Optional knobs (via env):
 - Frontend API target can be overridden in-browser using `window.__API_BASE__` or `window.__API_PORT__`.
 - Backend auto-creates DB tables and seeds admin at startup if missing.
 - Keep secrets out of git. Never commit `backend/.env` with real credentials.
+
+## Submission Notes
+
+- `backend/placement_portal.db` is intentionally included so current project data is preserved.
+- `backend/.env` is intentionally excluded from git and should remain local.
+- `backend/.env.example` is included as the template for environment variables.
+- Runtime files such as `backend/celerybeat-schedule*`, `.logs/`, and `dump.rdb` are safe to delete before submission. They are recreated automatically when services start.

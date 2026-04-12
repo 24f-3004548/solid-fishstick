@@ -67,20 +67,6 @@ const LoginView = {
           <p class="text-center text-muted mt-4 mb-3" style="font-size:.84rem">
             Don’t have an account? <router-link to="/register">Register here</router-link>
           </p>
-
-          <div class="mt-3 p-3 rounded-3" style="background:var(--surface-1);font-size:.75rem">
-            <p class="text-muted mb-2 fw-semibold">Quick login (dev):</p>
-            <div class="d-flex gap-2 flex-wrap">
-              <button class="btn btn-sm btn-outline-secondary"
-                @click="quickLogin('hrimansaha.10@gmail.com','Admin@1234')">Admin</button>
-              <button class="btn btn-sm btn-outline-secondary"
-                @click="quickLogin('m2024bsass011@stud.tiss.ac.in','Company@123')">Company 1</button>
-              <button class="btn btn-sm btn-outline-secondary"
-                @click="quickLogin('hr02@microsoft.com','Company@123')">Company 2</button>
-              <button class="btn btn-sm btn-outline-secondary"
-                @click="quickLogin('saha.hriman06@gmail.com','Student@123')">Student</button>
-            </div>
-          </div>
         </div>
       </section>
       </div>
@@ -151,11 +137,6 @@ const LoginView = {
       } finally {
         this.loading = false;
       }
-    },
-    quickLogin(email, password) {
-      this.form = { email, password };
-      this.touched = { email: true, password: true };
-      this.submit();
     }
   }
 };

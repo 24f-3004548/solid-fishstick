@@ -320,7 +320,8 @@ def list_drives():
 
     query = (
         PlacementDrive.query
-        .filter_by(status="approved")
+        .join(Company, PlacementDrive.company_id == Company.id)
+        .filter(PlacementDrive.status == "approved")
         .filter(PlacementDrive.application_deadline > now)
     )
 
@@ -329,10 +330,11 @@ def list_drives():
             db.or_(
                 PlacementDrive.title.ilike(f"%{search}%"),
                 PlacementDrive.description.ilike(f"%{search}%"),
+                Company.name.ilike(f"%{search}%"),
             )
         )
     if job_type:
-        query = query.filter_by(job_type=job_type)
+        query = query.filter(PlacementDrive.job_type == job_type)
 
     drives = query.order_by(PlacementDrive.application_deadline.asc()).all()
     joined_app = _student_joined_application(student.id)

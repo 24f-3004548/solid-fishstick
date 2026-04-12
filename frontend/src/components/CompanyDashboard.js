@@ -34,11 +34,18 @@ const CompanyDashboard = {
         <h2 class="mb-0">Welcome back, {{ company.name || 'Company' }}</h2>
         <p>Manage your active recruitment campaigns and track applicant progress across campuses.</p>
       </div>
-      <div class="portal-panel d-flex align-items-center gap-3" style="padding:.8rem 1rem;min-width:190px;">
-        <div class="stat-icon" style="background:var(--surface-2)"><i class="bi bi-megaphone-fill" style="color:var(--brand)"></i></div>
-        <div>
-          <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Active drives</div>
-          <div style="font-size:1.25rem;font-weight:800;line-height:1;">{{ stats.approved_drives || 0 }}</div>
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <button class="btn btn-sm btn-outline-primary" @click="exportHistoryCSV" :disabled="exportingHistory">
+          <span v-if="exportingHistory" class="spinner-border spinner-border-sm me-1"></span>
+          <i v-else class="bi bi-filetype-csv me-1"></i>
+          Export history
+        </button>
+        <div class="portal-panel d-flex align-items-center gap-3" style="padding:.8rem 1rem;min-width:190px;">
+          <div class="stat-icon" style="background:var(--surface-2)"><i class="bi bi-megaphone-fill" style="color:var(--brand)"></i></div>
+          <div>
+            <div class="text-muted text-uppercase" style="font-size:.68rem;letter-spacing:.08em;font-weight:700;">Active drives</div>
+            <div style="font-size:1.25rem;font-weight:800;line-height:1;">{{ stats.approved_drives || 0 }}</div>
+          </div>
         </div>
       </div>
     </div>
@@ -424,7 +431,6 @@ const CompanyDashboard = {
              display:flex;align-items:center;justify-content:center;padding:1rem;overflow-y:auto">
       <div class="pp-card" style="width:100%;max-width:580px;margin:auto">
         <h6 class="fw-600 mb-4">{{ driveModal.editing ? 'Edit drive' : 'Create new drive' }}</h6>
-        <p class="form-legend">Fields marked with * are required.</p>
         <div class="row g-3">
           <div class="col-12">
             <label class="form-label label-required">Drive title</label>
@@ -441,43 +447,59 @@ const CompanyDashboard = {
               v-model="driveForm.description"
               :class="['form-control', { 'is-invalid': driveValidation.submitted && !driveForm.description }]"
               rows="3"
+              placeholder="Summarize role, responsibilities, and required skills"
               required
             ></textarea>
           </div>
           <div class="col-md-6">
-            <label class="form-label">Job type</label>
-            <select v-model="driveForm.job_type" class="form-select">
-              <option value="">Select...</option>
+            <label class="form-label label-required">Job type</label>
+            <select
+              v-model="driveForm.job_type"
+              :class="['form-select', { 'is-invalid': driveValidation.submitted && !driveForm.job_type }]"
+              required
+            >
+              <option value="">Select job type</option>
               <option value="full-time">Full-time</option>
               <option value="internship">Internship</option>
             </select>
           </div>
           <div class="col-md-6">
-            <label class="form-label">Location</label>
-            <input v-model="driveForm.location" class="form-control" placeholder="Chennai / Remote"/>
+            <label class="form-label label-required">Location</label>
+            <input
+              v-model="driveForm.location"
+              :class="['form-control', { 'is-invalid': driveValidation.submitted && !driveForm.location }]"
+              placeholder="e.g. Chennai / Bengaluru / Remote"
+              required
+            />
           </div>
           <div class="col-md-6">
             <label class="form-label">Salary (LPA)</label>
-            <input v-model.number="driveForm.salary_lpa" type="number" step="0.5" class="form-control"/>
-            <div class="field-hint">Optional. Keep blank if not disclosed.</div>
+            <input v-model.number="driveForm.salary_lpa" type="number" step="0.5" class="form-control" placeholder="e.g. 12.5"/>
           </div>
           <div class="col-md-6">
-            <label class="form-label">Min CGPA</label>
-            <input v-model.number="driveForm.min_cgpa" type="number" step="0.1" min="0" max="10"
-              class="form-control"/>
+            <label class="form-label label-required">Min CGPA</label>
+            <input
+              v-model.number="driveForm.min_cgpa"
+              type="number"
+              step="0.1"
+              min="0"
+              max="10"
+              :class="['form-control', { 'is-invalid': driveValidation.submitted && (driveForm.min_cgpa === '' || driveForm.min_cgpa === null || driveForm.min_cgpa === undefined) }]"
+              placeholder="e.g. 7.0"
+              required
+            />
           </div>
           <div class="col-md-6">
             <label class="form-label">Target joinees</label>
             <input v-model.number="driveForm.target_joinees" type="number" min="1" class="form-control"
               placeholder="e.g. 12"/>
-            <div class="field-hint">Drive will auto-close when joined count reaches this target.</div>
           </div>
           <div class="col-md-6">
-            <label class="form-label">Eligible branches</label>
+            <label class="form-label label-required">Eligible branches</label>
             <div class="multi-select-wrap" @click.stop>
               <button
                 type="button"
-                class="form-control multi-select-trigger"
+                :class="['form-control', 'multi-select-trigger', { 'is-invalid': driveValidation.submitted && driveForm.eligible_branches.length === 0 }]"
                 @click="toggleMultiSelect('branches')"
               >
                 <span :class="{ 'multi-select-placeholder': driveForm.eligible_branches.length === 0 }">{{ selectedBranchesSummary }}</span>
@@ -492,11 +514,11 @@ const CompanyDashboard = {
             </div>
           </div>
           <div class="col-md-6">
-            <label class="form-label">Eligible years</label>
+            <label class="form-label label-required">Eligible years</label>
             <div class="multi-select-wrap" @click.stop>
               <button
                 type="button"
-                class="form-control multi-select-trigger"
+                :class="['form-control', 'multi-select-trigger', { 'is-invalid': driveValidation.submitted && driveForm.eligible_years.length === 0 }]"
                 @click="toggleMultiSelect('years')"
               >
                 <span :class="{ 'multi-select-placeholder': driveForm.eligible_years.length === 0 }">{{ selectedYearsSummary }}</span>
@@ -516,12 +538,9 @@ const CompanyDashboard = {
               v-model="driveForm.application_deadline"
               :class="['form-control', { 'is-invalid': driveValidation.submitted && !driveForm.application_deadline }]"
               type="datetime-local"
+              placeholder="Select application deadline"
               required
             />
-          </div>
-          <div class="col-md-6">
-            <label class="form-label">Drive date</label>
-            <input v-model="driveForm.drive_date" type="datetime-local" class="form-control"/>
           </div>
         </div>
         <div class="d-flex gap-2 justify-content-end mt-4">
@@ -652,6 +671,7 @@ const CompanyDashboard = {
       loadingHistory:false,
       savingProfile: false,
       savingDrive:   false,
+      exportingHistory: false,
       _onWindowFocus: null,
       _appSearchTimer: null,
       driveValidation: { submitted: false },
@@ -670,7 +690,7 @@ const CompanyDashboard = {
       ],
       profileForm: { description:"", website:"", industry:"", location:"", hr_name:"", hr_email:"", hr_phone:"" },
       driveForm:   { title:"", description:"", job_type:"", location:"", salary_lpa:"", min_cgpa:0,
-                     target_joinees:"", eligible_branches:[], eligible_years:[], application_deadline:"", drive_date:"" },
+                     target_joinees:"", eligible_branches:[], eligible_years:[], application_deadline:"" },
       driveModal:    { show: false, editing: false, driveId: null },
       applicationReviewModal: { show: false, loading: false, application: null, student: null },
       hoveredDiversity: null,
@@ -686,6 +706,9 @@ const CompanyDashboard = {
       this.activeTab = next || "overview";
     },
     activeTab(tab) {
+      if (tab === "overview") {
+        this.$nextTick(() => this.renderOverviewCharts());
+      }
       if (tab === "drives")  this.fetchDrives();
       if (tab === "applications") this.fetchApplications();
       if (tab === "history") this.fetchHistory();
@@ -805,13 +828,13 @@ const CompanyDashboard = {
 
     selectedBranchesSummary() {
       const selected = Array.isArray(this.driveForm.eligible_branches) ? this.driveForm.eligible_branches : [];
-      if (!selected.length) return "Not selected";
+      if (!selected.length) return "Select eligible branches";
       return selected.join(", ");
     },
 
     selectedYearsSummary() {
       const selected = Array.isArray(this.driveForm.eligible_years) ? this.driveForm.eligible_years : [];
-      if (!selected.length) return "Not selected";
+      if (!selected.length) return "Select eligible years";
       return this.yearOptions
         .filter((year) => selected.includes(year.value))
         .map((year) => year.label)
@@ -892,8 +915,10 @@ const CompanyDashboard = {
           hr_email:    this.company.hr_email    || "",
           hr_phone:    this.company.hr_phone    || "",
         };
-        await this.$nextTick();
-        this.renderOverviewCharts();
+        if (this.activeTab === "overview") {
+          await this.$nextTick();
+          this.renderOverviewCharts();
+        }
       } catch {
         if (!silent) this.showAlert("Failed to load dashboard", "danger");
       }
@@ -1124,7 +1149,7 @@ const CompanyDashboard = {
     openCreateDrive() {
       this.driveForm = { title:"", description:"", job_type:"", location:"",
         salary_lpa:"", min_cgpa:0, target_joinees:"", eligible_branches:[], eligible_years:[],
-        application_deadline:"", drive_date:"" };
+        application_deadline:"" };
       this.driveValidation.submitted = false;
       this.multiSelectOpen = "";
       this.driveModal = { show: true, editing: false, driveId: null };
@@ -1146,7 +1171,6 @@ const CompanyDashboard = {
                                 ? drive.eligible_years.map((value) => Number(value)).filter((value) => !Number.isNaN(value))
                                 : [],
         application_deadline: this.formatIstDateTimeLocal(drive.application_deadline),
-        drive_date:           this.formatIstDateTimeLocal(drive.drive_date),
       };
       this.driveValidation.submitted = false;
       this.multiSelectOpen = "";
@@ -1155,21 +1179,23 @@ const CompanyDashboard = {
 
     async saveDrive() {
       this.driveValidation.submitted = true;
-      if (!this.driveForm.title || !this.driveForm.description || !this.driveForm.application_deadline) {
-        return this.showAlert("Title, description and deadline are required", "danger");
+      const hasRequiredFields =
+        !!String(this.driveForm.title || "").trim() &&
+        !!String(this.driveForm.description || "").trim() &&
+        !!String(this.driveForm.job_type || "").trim() &&
+        !!String(this.driveForm.location || "").trim() &&
+        !(this.driveForm.min_cgpa === "" || this.driveForm.min_cgpa === null || this.driveForm.min_cgpa === undefined) &&
+        Array.isArray(this.driveForm.eligible_branches) && this.driveForm.eligible_branches.length > 0 &&
+        Array.isArray(this.driveForm.eligible_years) && this.driveForm.eligible_years.length > 0 &&
+        !!String(this.driveForm.application_deadline || "").trim();
+
+      if (!hasRequiredFields) {
+        return this.showAlert("Please fill all required fields", "danger");
       }
 
       const deadlineIso = this.istLocalToUtcIso(this.driveForm.application_deadline);
       if (!deadlineIso) {
         return this.showAlert("Invalid application deadline format", "danger");
-      }
-
-      let driveDateIso;
-      if (this.driveForm.drive_date) {
-        driveDateIso = this.istLocalToUtcIso(this.driveForm.drive_date);
-        if (!driveDateIso) {
-          return this.showAlert("Invalid drive date format", "danger");
-        }
       }
 
       this.savingDrive = true;
@@ -1185,7 +1211,6 @@ const CompanyDashboard = {
           eligible_branches: eligibleBranchesCsv,
           eligible_years: eligibleYearsCsv,
           application_deadline: deadlineIso,
-          drive_date: driveDateIso,
         };
 
         if (this.driveModal.editing) {
@@ -1275,17 +1300,12 @@ const CompanyDashboard = {
         this.showAlert("Offer is available only after the student accepts the interview call", "warning");
         return;
       }
-      const offerLetterUrl = prompt("Enter offer letter URL (PDF/Drive link):");
-      if (!offerLetterUrl) return;
-      const note = prompt("Optional message for candidate:") || "";
+      if (!confirm(`Send offer letter email to ${app.student_name || "this candidate"}?`)) return;
       try {
-        await ApiService.companySendOffer(app.id, {
-          offer_letter_url: offerLetterUrl,
-          message: note,
-        });
+        await ApiService.companySendOffer(app.id, {});
         await this.fetchApplications(true);
         await this.openApplicationReview(app);
-        this.showAlert("Offer sent to student", "success");
+        this.showAlert("Offer letter email sent to student", "success");
       } catch (e) {
         this.showAlert(e.response?.data?.message || "Failed to send offer", "danger");
       }
@@ -1317,6 +1337,18 @@ const CompanyDashboard = {
         this.showAlert("Profile updated", "success");
       } catch { this.showAlert("Failed to update profile", "danger"); }
       finally  { this.savingProfile = false; }
+    },
+
+    async exportHistoryCSV() {
+      this.exportingHistory = true;
+      try {
+        await ApiService.companyHistoryExport();
+        this.showAlert("Export started — the CSV will be emailed to your company account", "success");
+      } catch (e) {
+        this.showAlert(e.response?.data?.message || "Failed to export history", "danger");
+      } finally {
+        this.exportingHistory = false;
+      }
     },
 
     formatDate(dt) {

@@ -1,0 +1,916 @@
+openapi: 3.0.3
+info:
+  title: CareerSync Placement Portal API
+  version: 1.0.0
+  description: |
+    OpenAPI specification for the CareerSync campus placement management system.
+    This spec documents the Flask API resources exposed under /api/*.
+servers:
+  - url: http://localhost:5000
+    description: Local backend server
+
+tags:
+  - name: Auth
+  - name: Student
+  - name: Company
+  - name: Admin
+  - name: Notifications
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    GenericSuccess:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: Operation completed successfully
+    GenericError:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
+          example: Invalid request
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/auth/register/student:
+    post:
+      tags: [Auth]
+      summary: Register a student account
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201':
+          description: Student registered
+        '400':
+          description: Validation error
+
+  /api/auth/register/company:
+    post:
+      tags: [Auth]
+      summary: Register a company account
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201':
+          description: Company registered
+        '400':
+          description: Validation error
+
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login and receive JWT tokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Login successful
+        '401':
+          description: Invalid credentials
+
+  /api/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      responses:
+        '200':
+          description: Token refreshed
+        '401':
+          description: Unauthorized
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current user profile
+      responses:
+        '200':
+          description: User profile
+        '401':
+          description: Unauthorized
+
+  /api/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout current user
+      responses:
+        '200':
+          description: Logged out
+
+  /api/auth/change-password:
+    put:
+      tags: [Auth]
+      summary: Change password for logged-in user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Password changed
+        '400':
+          description: Validation error
+
+  /api/auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Send password reset token/link
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Reset flow initiated
+
+  /api/auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Reset password using token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Password reset complete
+        '400':
+          description: Invalid token/request
+
+  /api/student/ai/chat:
+    post:
+      tags: [Student]
+      summary: Chat assistant for student dashboard insights
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: AI response
+
+  /api/student/profile:
+    get:
+      tags: [Student]
+      summary: Get student profile
+      responses:
+        '200':
+          description: Student profile
+    put:
+      tags: [Student]
+      summary: Update student profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Profile updated
+
+  /api/student/profile/resume:
+    post:
+      tags: [Student]
+      summary: Upload student resume (PDF)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Resume uploaded
+
+  /api/student/dashboard:
+    get:
+      tags: [Student]
+      summary: Get student dashboard summary
+      responses:
+        '200':
+          description: Dashboard data
+
+  /api/student/drives:
+    get:
+      tags: [Student]
+      summary: List available placement drives for student
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Drives list
+
+  /api/student/drives/{drive_id}:
+    get:
+      tags: [Student]
+      summary: Get placement drive details
+      parameters:
+        - in: path
+          name: drive_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Drive details
+
+  /api/student/drives/{drive_id}/apply:
+    post:
+      tags: [Student]
+      summary: Apply to a placement drive
+      parameters:
+        - in: path
+          name: drive_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '201':
+          description: Application submitted
+        '400':
+          description: Not eligible or invalid
+
+  /api/student/applications:
+    get:
+      tags: [Student]
+      summary: List student applications
+      responses:
+        '200':
+          description: Applications list
+
+  /api/student/applications/{app_id}:
+    get:
+      tags: [Student]
+      summary: Get single student application detail
+      parameters:
+        - in: path
+          name: app_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Application details
+
+  /api/student/applications/{app_id}/withdraw:
+    delete:
+      tags: [Student]
+      summary: Withdraw an application
+      parameters:
+        - in: path
+          name: app_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Application withdrawn
+
+  /api/student/applications/{app_id}/offer-response:
+    put:
+      tags: [Student]
+      summary: Respond to offer (accept/reject)
+      parameters:
+        - in: path
+          name: app_id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Offer response recorded
+
+  /api/student/applications/{app_id}/interview-response:
+    put:
+      tags: [Student]
+      summary: Respond to interview invitation
+      parameters:
+        - in: path
+          name: app_id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Interview response recorded
+
+  /api/student/history:
+    get:
+      tags: [Student]
+      summary: Get student placement history
+      responses:
+        '200':
+          description: Placement history
+
+  /api/student/applications/export:
+    get:
+      tags: [Student]
+      summary: Trigger export of applications
+      responses:
+        '202':
+          description: Export job accepted
+
+  /api/student/applications/export/status/{job_id}:
+    get:
+      tags: [Student]
+      summary: Check export job status
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job status
+
+  /api/company/profile:
+    get:
+      tags: [Company]
+      summary: Get company profile
+      responses:
+        '200':
+          description: Company profile
+    put:
+      tags: [Company]
+      summary: Update company profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Company profile updated
+
+  /api/company/dashboard:
+    get:
+      tags: [Company]
+      summary: Get company dashboard summary
+      responses:
+        '200':
+          description: Dashboard data
+
+  /api/company/drives:
+    get:
+      tags: [Company]
+      summary: List company drives
+      responses:
+        '200':
+          description: Drives list
+    post:
+      tags: [Company]
+      summary: Create placement drive
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201':
+          description: Drive created
+
+  /api/company/drives/{drive_id}:
+    get:
+      tags: [Company]
+      summary: Get company drive by id
+      parameters:
+        - in: path
+          name: drive_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Drive details
+    put:
+      tags: [Company]
+      summary: Update drive
+      parameters:
+        - in: path
+          name: drive_id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Drive updated
+
+  /api/company/drives/{drive_id}/close:
+    put:
+      tags: [Company]
+      summary: Close drive
+      parameters:
+        - in: path
+          name: drive_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Drive closed
+
+  /api/company/applications:
+    get:
+      tags: [Company]
+      summary: List applications across company drives
+      responses:
+        '200':
+          description: Applications list
+
+  /api/company/drives/{drive_id}/applications:
+    get:
+      tags: [Company]
+      summary: List applications for one drive
+      parameters:
+        - in: path
+          name: drive_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Drive applications
+
+  /api/company/applications/{app_id}:
+    get:
+      tags: [Company]
+      summary: Get application detail
+      parameters:
+        - in: path
+          name: app_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Application details
+
+  /api/company/applications/{app_id}/status:
+    put:
+      tags: [Company]
+      summary: Update application status
+      parameters:
+        - in: path
+          name: app_id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Status updated
+
+  /api/company/applications/{app_id}/offer-letter:
+    post:
+      tags: [Company]
+      summary: Upload/generate offer letter for application
+      parameters:
+        - in: path
+          name: app_id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Offer letter processed
+
+  /api/company/drives/{drive_id}/applications/bulk-update:
+    put:
+      tags: [Company]
+      summary: Bulk update application statuses for drive
+      parameters:
+        - in: path
+          name: drive_id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Bulk update completed
+
+  /api/company/history:
+    get:
+      tags: [Company]
+      summary: Company hiring history
+      responses:
+        '200':
+          description: History data
+
+  /api/company/history/export:
+    get:
+      tags: [Company]
+      summary: Export company history data
+      responses:
+        '200':
+          description: Export file or link
+
+  /api/admin/dashboard:
+    get:
+      tags: [Admin]
+      summary: Admin dashboard statistics
+      responses:
+        '200':
+          description: Dashboard data
+
+  /api/admin/companies:
+    get:
+      tags: [Admin]
+      summary: List companies
+      responses:
+        '200':
+          description: Company list
+
+  /api/admin/companies/{company_id}:
+    get:
+      tags: [Admin]
+      summary: Get company by id
+      parameters:
+        - in: path
+          name: company_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Company details
+
+  /api/admin/companies/{company_id}/approve:
+    put:
+      tags: [Admin]
+      summary: Approve company
+      parameters:
+        - in: path
+          name: company_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Company approved
+
+  /api/admin/companies/{company_id}/reject:
+    put:
+      tags: [Admin]
+      summary: Reject company
+      parameters:
+        - in: path
+          name: company_id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Company rejected
+
+  /api/admin/companies/{company_id}/blacklist:
+    put:
+      tags: [Admin]
+      summary: Blacklist company
+      parameters:
+        - in: path
+          name: company_id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Company blacklisted
+
+  /api/admin/companies/{company_id}/unblacklist:
+    put:
+      tags: [Admin]
+      summary: Remove company from blacklist
+      parameters:
+        - in: path
+          name: company_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Company unblacklisted
+
+  /api/admin/students:
+    get:
+      tags: [Admin]
+      summary: List students
+      responses:
+        '200':
+          description: Student list
+
+  /api/admin/students/{student_id}:
+    get:
+      tags: [Admin]
+      summary: Get student by id
+      parameters:
+        - in: path
+          name: student_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Student details
+
+  /api/admin/students/{student_id}/blacklist:
+    put:
+      tags: [Admin]
+      summary: Blacklist student
+      parameters:
+        - in: path
+          name: student_id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Student blacklisted
+
+  /api/admin/students/{student_id}/unblacklist:
+    put:
+      tags: [Admin]
+      summary: Remove student from blacklist
+      parameters:
+        - in: path
+          name: student_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Student unblacklisted
+
+  /api/admin/drives:
+    get:
+      tags: [Admin]
+      summary: List drives for admin review
+      responses:
+        '200':
+          description: Drives list
+
+  /api/admin/drives/{drive_id}/approve:
+    put:
+      tags: [Admin]
+      summary: Approve drive
+      parameters:
+        - in: path
+          name: drive_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Drive approved
+
+  /api/admin/drives/{drive_id}/reject:
+    put:
+      tags: [Admin]
+      summary: Reject drive
+      parameters:
+        - in: path
+          name: drive_id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Drive rejected
+
+  /api/admin/drives/{drive_id}/close:
+    put:
+      tags: [Admin]
+      summary: Close drive
+      parameters:
+        - in: path
+          name: drive_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Drive closed
+
+  /api/admin/audit-logs:
+    get:
+      tags: [Admin]
+      summary: List audit logs
+      responses:
+        '200':
+          description: Audit logs list
+
+  /api/admin/applications:
+    get:
+      tags: [Admin]
+      summary: List applications (global admin view)
+      responses:
+        '200':
+          description: Applications list
+
+  /api/admin/applications/{app_id}:
+    get:
+      tags: [Admin]
+      summary: Get application by id (admin)
+      parameters:
+        - in: path
+          name: app_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Application detail
+
+  /api/admin/search:
+    get:
+      tags: [Admin]
+      summary: Global search across entities
+      parameters:
+        - in: query
+          name: q
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Search results
+
+  /api/admin/reports/summary:
+    get:
+      tags: [Admin]
+      summary: Generate summary report
+      responses:
+        '200':
+          description: Summary report
+
+  /api/admin/reports/send-instant:
+    post:
+      tags: [Admin]
+      summary: Send instant report/notification
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Report sent
+
+  /api/admin/system/health:
+    get:
+      tags: [Admin]
+      summary: System health check
+      responses:
+        '200':
+          description: Health data
+
+  /api/notifications:
+    get:
+      tags: [Notifications]
+      summary: List notifications for current user
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Notifications list
+
+  /api/notifications/unread-count:
+    get:
+      tags: [Notifications]
+      summary: Get unread notification count
+      responses:
+        '200':
+          description: Unread count
+
+  /api/notifications/{notification_id}/read:
+    put:
+      tags: [Notifications]
+      summary: Mark one notification as read
+      parameters:
+        - in: path
+          name: notification_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Notification marked read
+
+  /api/notifications/read-all:
+    put:
+      tags: [Notifications]
+      summary: Mark all notifications as read
+      responses:
+        '200':
+          description: All notifications marked read

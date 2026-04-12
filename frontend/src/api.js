@@ -139,6 +139,7 @@ const ApiService = {
   companySendOffer:    (id, d)  => api.post(`/company/applications/${id}/offer-letter`, d),
   companyBulkUpdate:   (id, d)  => api.put(`/company/drives/${id}/applications/bulk-update`, d),
   companyHistory:      ()       => api.get("/company/history"),
+  companyHistoryExport:()       => api.get("/company/history/export"),
 
   // Student
   studentDashboard:    ()       => api.get("/student/dashboard"),

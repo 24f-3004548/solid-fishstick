@@ -33,6 +33,7 @@ build/
 .env
 .env.*
 !.env.example
+!backend/.env.example
 backend/.env
 
 # Flask / DB runtime artifacts
@@ -40,7 +41,7 @@ instance/
 *.db
 *.sqlite
 *.sqlite3
-backend/placement_portal.db
+!backend/placement_portal.db
 
 # Celery / scheduler artifacts
 backend/celerybeat-schedule

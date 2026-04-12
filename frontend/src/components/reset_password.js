@@ -27,18 +27,31 @@ const ResetPasswordView = {
           <form @submit.prevent="submit">
             <div class="mb-3">
               <label class="form-label label-required">New password</label>
-              <input v-model="newPassword" @input="onPasswordInput" @blur="touched.newPassword=true;validatePassword()" :type="showPw ? 'text' : 'password'" :class="['form-control', { 'is-invalid': touched.newPassword && errors.newPassword.length }]" required placeholder="Minimum 6 characters" />
+              <div class="input-group">
+                <input v-model="newPassword" @input="onPasswordInput" @blur="touched.newPassword=true;validatePassword()" :type="showNewPassword ? 'text' : 'password'" :class="['form-control', { 'is-invalid': touched.newPassword && errors.newPassword.length }]" required placeholder="Minimum 6 characters" />
+                <button type="button" class="btn btn-outline-secondary"
+                  @click="showNewPassword = !showNewPassword"
+                  :title="showNewPassword ? 'Hide password' : 'Show password'"
+                  :aria-label="showNewPassword ? 'Hide password' : 'Show password'">
+                  <i :class="showNewPassword ? 'bi bi-eye-slash' : 'bi bi-eye'"></i>
+                </button>
+              </div>
               <div v-for="err in errors.newPassword" :key="err" class="field-error"><i class="bi bi-exclamation-circle"></i> {{ err }}</div>
               <div class="field-hint" style="margin-top:.35rem;">Password requirements: at least 6 characters and only letters (A-Z, a-z) and numbers (0-9).</div>
             </div>
 
             <div class="mb-4">
               <label class="form-label label-required">Confirm password</label>
-              <input v-model="confirmPassword" @input="onConfirmPasswordInput" @blur="touched.confirmPassword=true;validateConfirmPassword()" :type="showPw ? 'text' : 'password'" :class="['form-control', { 'is-invalid': touched.confirmPassword && errors.confirmPassword.length }]" required placeholder="Re-enter new password" />
+              <div class="input-group">
+                <input v-model="confirmPassword" @input="onConfirmPasswordInput" @blur="touched.confirmPassword=true;validateConfirmPassword()" :type="showConfirmPassword ? 'text' : 'password'" :class="['form-control', { 'is-invalid': touched.confirmPassword && errors.confirmPassword.length }]" required placeholder="Re-enter new password" />
+                <button type="button" class="btn btn-outline-secondary"
+                  @click="showConfirmPassword = !showConfirmPassword"
+                  :title="showConfirmPassword ? 'Hide password' : 'Show password'"
+                  :aria-label="showConfirmPassword ? 'Hide password' : 'Show password'">
+                  <i :class="showConfirmPassword ? 'bi bi-eye-slash' : 'bi bi-eye'"></i>
+                </button>
+              </div>
               <div v-for="err in errors.confirmPassword" :key="err" class="field-error"><i class="bi bi-exclamation-circle"></i> {{ err }}</div>
-              <button type="button" class="btn btn-link px-0 mt-1" style="font-size:.78rem" @click="showPw = !showPw">
-                {{ showPw ? 'Hide password' : 'Show password' }}
-              </button>
             </div>
 
             <button type="submit" class="btn btn-primary w-100" :disabled="loading || !token" style="padding:.8rem .9rem;">
@@ -61,7 +74,8 @@ const ResetPasswordView = {
       confirmPassword: "",
       errors: { newPassword: [], confirmPassword: [] },
       touched: { newPassword: false, confirmPassword: false },
-      showPw: false,
+      showNewPassword: false,
+      showConfirmPassword: false,
       loading: false,
       error: "",
       success: "",

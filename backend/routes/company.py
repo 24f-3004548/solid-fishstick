@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 from datetime import datetime, timezone
 from flask_mail import Message
+from markupsafe import escape
 
 from extensions import db, mail
 from models import User, Student, Company, PlacementDrive, Application, Notification
@@ -165,6 +166,114 @@ def _notification_type_for_status(status):
     return "warning"
 
 
+def _fmt_datetime_for_email(value):
+    if not value:
+        return "Not specified"
+    return value.strftime("%d %b %Y, %I:%M %p UTC")
+
+
+def _company_email_palette(company_name):
+    # Stable palette selection so each company gets a consistent email look.
+    palettes = [
+        {
+            "primary": "#0a4da3",
+            "secondary": "#1e6fd9",
+            "surface": "#eef4ff",
+            "accent": "#0f766e",
+            "text": "#0f172a",
+        },
+        {
+            "primary": "#14532d",
+            "secondary": "#16a34a",
+            "surface": "#edfdf4",
+            "accent": "#065f46",
+            "text": "#052e16",
+        },
+        {
+            "primary": "#9a3412",
+            "secondary": "#ea580c",
+            "surface": "#fff7ed",
+            "accent": "#b45309",
+            "text": "#431407",
+        },
+        {
+            "primary": "#7e22ce",
+            "secondary": "#a855f7",
+            "surface": "#faf5ff",
+            "accent": "#6d28d9",
+            "text": "#3b0764",
+        },
+        {
+            "primary": "#9f1239",
+            "secondary": "#e11d48",
+            "surface": "#fff1f2",
+            "accent": "#be123c",
+            "text": "#4c0519",
+        },
+    ]
+    seed = sum((idx + 1) * ord(ch) for idx, ch in enumerate((company_name or "Company")))
+    return palettes[seed % len(palettes)]
+
+
+def _build_offer_letter_email_html(company, app, note=""):
+    drive = app.drive
+    student_name = app.student.full_name if app.student else "Candidate"
+    hr_name = company.hr_name or "HR Team"
+    hr_email = company.hr_email or (company.user.email if company.user else "Not provided")
+    hr_phone = company.hr_phone or "Not provided"
+    palette = _company_email_palette(company.name)
+
+    salary_text = f"{drive.salary_lpa} LPA" if drive and drive.salary_lpa is not None else "As per company standards"
+    job_type = drive.job_type if drive and drive.job_type else "Not specified"
+    location = drive.location if drive and drive.location else "Not specified"
+    drive_date = _fmt_datetime_for_email(drive.drive_date if drive else None)
+
+    note_html = ""
+    if note:
+        note_html = (
+            f"<div style=\"margin:16px 0;padding:12px;border-radius:10px;background:{palette['surface']};"
+            f"border-left:4px solid {palette['secondary']};\">"
+            f"<strong style=\"color:{palette['primary']};\">Message from company:</strong><br>{escape(note)}"
+            "</div>"
+        )
+
+    return f"""
+        <div style="font-family:'Segoe UI',Arial,sans-serif;max-width:720px;margin:0 auto;color:{palette['text']};line-height:1.5;background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
+            <div style="padding:18px 20px;background:linear-gradient(120deg,{palette['primary']} 0%,{palette['secondary']} 100%);color:#ffffff;">
+                <p style="margin:0 0 4px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;opacity:0.92;">{escape(company.name)}</p>
+                <h2 style="margin:0;font-size:24px;line-height:1.2;color:#ffffff;">Offer Letter</h2>
+            </div>
+
+            <div style="padding:18px 20px 22px;">
+                <p style="margin:0 0 16px;">Dear {escape(student_name)},</p>
+                <p style="margin:0 0 16px;">Congratulations! We are pleased to offer you the role of <strong>{escape(drive.title if drive else 'Not specified')}</strong> at <strong>{escape(company.name)}</strong>.</p>
+
+                {note_html}
+
+                <div style="border:1px solid #dbe2ea;border-radius:10px;padding:14px 16px;margin-bottom:14px;background:#ffffff;">
+                    <h3 style="margin:0 0 10px;font-size:15px;color:{palette['primary']};">Job Details</h3>
+                    <p style="margin:4px 0;"><strong>Company:</strong> {escape(company.name)}</p>
+                    <p style="margin:4px 0;"><strong>Role / Drive Title:</strong> {escape(drive.title if drive else 'Not specified')}</p>
+                    <p style="margin:4px 0;"><strong>Job Type:</strong> {escape(job_type)}</p>
+                    <p style="margin:4px 0;"><strong>Location:</strong> {escape(location)}</p>
+                    <p style="margin:4px 0;"><strong>CTC:</strong> <span style="color:{palette['accent']};font-weight:600;">{escape(str(salary_text))}</span></p>
+                    <p style="margin:4px 0;"><strong>Interview/Drive Date:</strong> {escape(drive_date)}</p>
+                </div>
+
+                <div style="border:1px solid #dbe2ea;border-radius:10px;padding:14px 16px;margin-bottom:14px;background:{palette['surface']};">
+                    <h3 style="margin:0 0 10px;font-size:15px;color:{palette['primary']};">HR Contact Details</h3>
+                    <p style="margin:4px 0;"><strong>Contact Person:</strong> {escape(hr_name)}</p>
+                    <p style="margin:4px 0;"><strong>Email:</strong> {escape(hr_email)}</p>
+                    <p style="margin:4px 0;"><strong>Phone:</strong> {escape(hr_phone)}</p>
+                </div>
+
+                <p style="margin:0 0 6px;">Please log in to the placement portal to accept or reject this offer.</p>
+                <p style="margin:0;">Best regards,<br>{escape(company.name)} Recruitment Team</p>
+            </div>
+        </div>
+    """
+
+
 # ==================================================================
 # COMPANY PROFILE
 # ==================================================================
@@ -290,8 +399,24 @@ def create_drive():
 
     data = request.get_json(silent=True) or {}
 
-    required = ["title", "description", "application_deadline"]
-    missing  = [f for f in required if not data.get(f)]
+    required = [
+        "title",
+        "description",
+        "job_type",
+        "location",
+        "eligible_branches",
+        "eligible_years",
+        "application_deadline",
+        "min_cgpa",
+    ]
+
+    def _present(field):
+        value = data.get(field)
+        if field == "min_cgpa":
+            return value is not None and str(value).strip() != ""
+        return value is not None and str(value).strip() != ""
+
+    missing  = [f for f in required if not _present(f)]
     if missing:
         return _error(f"Missing fields: {', '.join(missing)}")
 
@@ -619,7 +744,6 @@ def send_offer_letter(app_id):
         return _error("Application does not belong to your company", 403)
 
     data = request.get_json(silent=True) or {}
-    offer_link = str(data.get("offer_letter_url") or "").strip()
     offer_message = str(data.get("message") or "").strip()
 
     current_status = _normalized_status(app.status)
@@ -629,9 +753,6 @@ def send_offer_letter(app_id):
     joined = _student_joined_elsewhere(app.student_id, exclude_app_id=app.id)
     if joined:
         return _error("Student has already accepted another offer and cannot receive new offers")
-
-    if not offer_link:
-        return _error("offer_letter_url is required")
 
     student_email = app.student.user.email if app.student and app.student.user else None
     if not student_email:
@@ -646,13 +767,7 @@ def send_offer_letter(app_id):
         msg = Message(
             subject=subject,
             recipients=[student_email],
-            html=f"""
-            <div style=\"font-family:'Segoe UI',Arial,sans-serif;max-width:600px;margin:0 auto\">
-              <h2 style=\"color:#1f2937\">Offer Letter</h2>
-              <p style=\"color:#374151\">{body_message}</p>
-              <p><a href=\"{offer_link}\" style=\"background:#1a56db;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none\">View Offer Letter</a></p>
-            </div>
-            """,
+                        html=_build_offer_letter_email_html(company, app, offer_message or body_message),
         )
         mail.send(msg)
     except Exception:
@@ -660,7 +775,7 @@ def send_offer_letter(app_id):
         return _error("Could not send offer letter email at the moment", 500)
 
     app.status = "offered"
-    app.remarks = offer_link
+    app.remarks = "Offer letter has been sent to your email. Please review and respond in the portal."
 
     db.session.add(Notification(
         user_id=app.student.user_id,
@@ -673,7 +788,7 @@ def send_offer_letter(app_id):
         action="application.offer_letter.sent",
         entity_type="application",
         entity_id=app.id,
-        details={"drive_id": app.drive_id, "offer_letter_url": offer_link},
+        details={"drive_id": app.drive_id, "student_email": student_email},
         ip_address=request.remote_addr,
     )
     db.session.commit()
@@ -767,4 +882,28 @@ def placement_history():
     return _ok({
         "total_selected": len(selected),
         "history": [a.to_dict() for a in selected]
+    })
+
+
+@company_bp.route("/history/export", methods=["GET"])
+@jwt_required()
+def export_history():
+    company, err = _get_company()
+    if err: return err
+
+    from jobs.tasks import export_company_history_csv
+    job = export_company_history_csv.delay(company.id)
+
+    log_audit(
+        actor_user_id=_actor_user_id(),
+        action="company.export_history",
+        entity_type="company",
+        entity_id=company.id,
+        details={"job_id": job.id},
+        ip_address=request.remote_addr,
+    )
+
+    return _ok({
+        "message": "Company history export started. You will receive the CSV via email.",
+        "job_id": job.id,
     })

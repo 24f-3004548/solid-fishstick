@@ -3,7 +3,7 @@ import io
 import csv
 from flask_mail import Message
 from extensions import celery, db
-from models import Student, PlacementDrive, Application, User, PasswordResetToken
+from models import Student, Company, PlacementDrive, Application, User, PasswordResetToken
 from utils.job_runs import record_job_run
 from utils.datetime_utils import now_ist, to_ist_label
 
@@ -207,7 +207,7 @@ def export_applications_csv(student_id):
       return result
 
     apps = Application.query.filter_by(student_id=student_id)\
-                            .order_by(Application.applied_at.desc()).all()
+                            .order_by(Application.id.asc()).all()
 
     # Build CSV in memory
     output = io.StringIO()
@@ -215,8 +215,7 @@ def export_applications_csv(student_id):
     writer.writerow([
         "Application ID", "Student ID", "Student Name",
         "Company Name", "Drive Title", "Job Type",
-        "Application Date", "Status", "Interview Type",
-        "Interview Date", "Remarks"
+      "Application Date", "Status", "Remarks"
     ])
 
     for a in apps:
@@ -229,8 +228,6 @@ def export_applications_csv(student_id):
             a.drive.job_type if a.drive else "",
             a.applied_at.strftime("%Y-%m-%d %H:%M"),
             a.status,
-            a.interview_type  or "",
-            a.interview_date.strftime("%Y-%m-%d %H:%M") if a.interview_date else "",
             a.remarks or "",
         ])
 
@@ -255,6 +252,98 @@ def export_applications_csv(student_id):
     except Exception as e:
         result = {"status": "error", "message": str(e)}
         record_job_run("jobs.export_applications_csv", "error", result["message"], {"student_id": student_id})
+        return result
+
+
+@celery.task(name="jobs.export_company_history_csv")
+def export_company_history_csv(company_id):
+    from extensions import mail
+
+    company = Company.query.get(company_id)
+    if not company:
+        result = {"status": "error", "message": "Company not found"}
+        record_job_run("jobs.export_company_history_csv", "error", result["message"], {"company_id": company_id})
+        return result
+
+    recipient_email = company.hr_email or (company.user.email if company.user else None)
+    if not recipient_email:
+        result = {"status": "error", "message": "Company recipient email not found"}
+        record_job_run("jobs.export_company_history_csv", "error", result["message"], {"company_id": company_id})
+        return result
+
+    selected_apps = (
+        Application.query
+        .join(PlacementDrive, Application.drive_id == PlacementDrive.id)
+        .join(Student, Application.student_id == Student.id)
+        .filter(PlacementDrive.company_id == company_id)
+        .order_by(Application.updated_at.desc())
+        .all()
+    )
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Application ID",
+        "Student ID",
+        "Student Name",
+        "Student Email",
+        "Branch",
+        "Year",
+        "CGPA",
+        "Drive Title",
+        "Job Type",
+        "Status",
+        "Applied At",
+        "Last Updated",
+    ])
+
+    for app in selected_apps:
+        student = app.student
+        drive = app.drive
+        writer.writerow([
+            app.id,
+            student.id if student else "",
+            student.full_name if student else "",
+            student.user.email if student and student.user else "",
+            student.branch if student else "",
+            student.year if student else "",
+            student.cgpa if student else "",
+            drive.title if drive else "",
+            drive.job_type if drive else "",
+            app.status,
+            app.applied_at.strftime("%Y-%m-%d %H:%M") if app.applied_at else "",
+            app.updated_at.strftime("%Y-%m-%d %H:%M") if app.updated_at else "",
+        ])
+
+    csv_content = output.getvalue()
+
+    try:
+        msg = Message(
+            subject="CareerSync — Your company hiring history export",
+            recipients=[recipient_email],
+            html=_render_company_export_email(company, len(selected_apps)),
+        )
+        msg.attach(
+            filename=f"company_history_{company.id}.csv",
+            content_type="text/csv",
+            data=csv_content,
+        )
+        mail.send(msg)
+        result = {
+            "status": "ok",
+            "message": "Company history CSV exported and emailed",
+            "total": len(selected_apps),
+        }
+        record_job_run(
+            "jobs.export_company_history_csv",
+            "success",
+            result["message"],
+            {"company_id": company_id, "total": len(selected_apps)},
+        )
+        return result
+    except Exception as exc:
+        result = {"status": "error", "message": str(exc)}
+        record_job_run("jobs.export_company_history_csv", "error", result["message"], {"company_id": company_id})
         return result
 
 
@@ -451,6 +540,25 @@ def _render_export_email(student, count):
         <p style="font-size:14px;color:#374151">
           Your placement application history has been exported successfully.
           The CSV file with <strong>{count} application(s)</strong> is attached to this email.
+        </p>
+        <p style="font-size:13px;color:#9ca3af;margin-top:24px">
+          Exported on {now_ist().strftime("%d %b %Y at %I:%M %p IST")}
+        </p>
+      </div>
+    </div>"""
+
+
+def _render_company_export_email(company, count):
+    return f"""
+    <div style="font-family:'Segoe UI',Arial,sans-serif;max-width:520px;margin:0 auto">
+      <div style="background:#1a56db;padding:24px 28px">
+        <h1 style="color:#fff;margin:0;font-size:18px">CareerSync</h1>
+      </div>
+      <div style="padding:28px">
+        <p style="font-size:15px;color:#111827">Hi <strong>{company.name}</strong> team,</p>
+        <p style="font-size:14px;color:#374151">
+          Your company placement history export is ready.
+          The attached CSV includes <strong>{count} selected/joined candidate record(s)</strong>.
         </p>
         <p style="font-size:13px;color:#9ca3af;margin-top:24px">
           Exported on {now_ist().strftime("%d %b %Y at %I:%M %p IST")}

@@ -37,9 +37,6 @@ const StudentDashboard = {
         <p>{{ student.branch || 'Branch' }} · Year {{ student.year || '—' }} · CGPA {{ student.cgpa || '—' }}</p>
       </div>
       <div class="d-flex gap-2 flex-wrap align-items-center">
-        <button class="btn btn-sm btn-outline-secondary" @click="goToTab('profile')">
-          <i class="bi bi-person-gear me-1"></i>Profile
-        </button>
         <button class="btn btn-sm btn-outline-primary" @click="exportCSV" :disabled="exporting">
           <span v-if="exporting" class="spinner-border spinner-border-sm me-1"></span>
           <i v-else class="bi bi-download me-1"></i>Export history
@@ -112,7 +109,7 @@ const StudentDashboard = {
           </div>
 
           <div class="d-flex flex-column gap-3">
-            <div class="pp-card">
+            <div class="pp-card student-open-for-you-card">
               <div class="d-flex justify-content-between align-items-center mb-2">
                 <h6 class="mb-0 fw-bold">Open for you</h6>
                 <span class="badge rounded-pill bg-light text-primary">{{ eligibleDrives.length }} drives</span>
@@ -491,6 +488,10 @@ const StudentDashboard = {
                 <div v-if="a.remarks" class="mt-1 text-muted" style="font-size:.82rem">
                   <i class="bi bi-chat-left-text me-1"></i>{{ a.remarks }}
                 </div>
+                <div v-if="a.status==='offered'" class="mt-1 text-muted d-flex align-items-center gap-1" style="font-size:.82rem">
+                  <i class="bi bi-envelope-open" aria-hidden="true"></i>
+                  <span>Offer letter sent on email</span>
+                </div>
               </div>
               <div v-if="!isLockedByAcceptedElsewhere(a)" class="d-flex flex-column gap-2 align-items-stretch">
                 <button
@@ -506,14 +507,6 @@ const StudentDashboard = {
                   @click="respondToInterview(a, 'cancel')"
                 >
                   <i class="bi bi-x-circle me-1" aria-hidden="true"></i>Cancel application
-                </button>
-                <button
-                  v-if="a.status==='offered'"
-                  class="btn btn-sm btn-outline-primary"
-                  :aria-label="'View offer letter for ' + a.drive_title + ' at ' + a.company_name"
-                  @click="viewOffer(a)"
-                >
-                  <i class="bi bi-file-earmark-text me-1" aria-hidden="true"></i>View offer
                 </button>
                 <button
                   v-if="a.status==='offered'"
@@ -1129,6 +1122,20 @@ const StudentDashboard = {
       return chunks.join("");
     },
 
+    debouncedSearch() {
+      if (this._searchTimer) clearTimeout(this._searchTimer);
+      this._searchTimer = setTimeout(() => {
+        this.fetchDrives(true);
+      }, 300);
+    },
+
+    debouncedAppSearch() {
+      if (this._appSearchTimer) clearTimeout(this._appSearchTimer);
+      this._appSearchTimer = setTimeout(() => {
+        this.appCurrentPage = 1;
+      }, 200);
+    },
+
     async refreshCurrentView(silent = false) {
       await this.fetchDashboard(silent);
       if (this.activeTab === "drives") await this.fetchDrives(silent);
@@ -1278,7 +1285,7 @@ const StudentDashboard = {
     },
 
     viewOffer(app) {
-      const text = app.remarks || "No offer document link provided.";
+      const text = app.remarks || "Offer letter has been sent to your email. Please check your inbox/spam folder.";
       const match = text.match(/https?:\/\/\S+/i);
       if (match && confirm("Open offer document in a new tab?")) {
         window.open(match[0], "_blank", "noopener,noreferrer");

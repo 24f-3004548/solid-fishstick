@@ -419,6 +419,12 @@ a { color: var(--brand); text-decoration: none; }
   gap: .95rem;
 }
 
+.student-open-for-you-card {
+  min-height: 198px;
+  display: flex;
+  flex-direction: column;
+}
+
 .student-app-row,
 .student-drive-row {
   display: flex;
